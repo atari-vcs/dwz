@@ -1,0 +1,4598 @@
+git diff bc8f69b695fea7456a43c81e7fcb656eac4d60bb 8c5331661e4fc490ce645afaaea5519d6fdb291f
+
+diff --git a/COPYRIGHT_YEARS b/COPYRIGHT_YEARS
+new file mode 100644
+index 0000000..bcb248f
+--- /dev/null
++++ b/COPYRIGHT_YEARS
+@@ -0,0 +1,3 @@
++-DFSF_YEARS='"1992-2019"'
++-DRH_YEARS='"2001-2018"'
++-DSUSE_YEARS='"2019"'
+diff --git a/Makefile b/Makefile
+index 7e281e5..fc70bfb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -5,7 +5,8 @@ srcdir=$(shell pwd)
+ endif
+ CFLAGS = -O2 -g
+ DWZ_VERSION := $(shell cat $(srcdir)/VERSION)
+-override CFLAGS += -Wall -W -D_FILE_OFFSET_BITS=64 -DDWZ_VERSION='"$(DWZ_VERSION)"'
++override CFLAGS += -Wall -W -D_FILE_OFFSET_BITS=64 \
++	-DDWZ_VERSION='"$(DWZ_VERSION)"' $(shell cat $(srcdir)/COPYRIGHT_YEARS)
+ prefix = /usr
+ exec_prefix = $(prefix)
+ bindir = $(exec_prefix)/bin
+@@ -25,9 +26,10 @@ clean:
+ PWD:=$(shell pwd -P)
+ 
+ TEST_SRC = $(srcdir)/testsuite/dwz.tests
++TEST_EXECS_DWARF_ASM = no-multifile-prop
+ TEST_EXECS = hello dw2-restrict py-section-script dwz-for-test min two-typedef \
+ 	dw2-skip-prologue start implptr-64bit-d2o4a8r8t0 hello-gold-gdb-index \
+-	start-gold hello-gnu-pubnames varval
++	start-gold hello-gnu-pubnames varval $(TEST_EXECS_DWARF_ASM)
+ 
+ hello:
+ 	$(CC) $(TEST_SRC)/hello.c -o $@ -g
+@@ -52,7 +54,8 @@ DWZ_TEST_SOURCES := $(patsubst %.o,%-for-test.c,$(OBJECTS))
+ 
+ dwz-for-test: $(DWZ_TEST_SOURCES)
+ 	$(CC) $(DWZ_TEST_SOURCES) -O2 -g -lelf -o $@ -Wall -W -DDEVEL \
+-	  -D_FILE_OFFSET_BITS=64 -DDWZ_VERSION='"for-test"' -I$(srcdir)
++	  -D_FILE_OFFSET_BITS=64 -DDWZ_VERSION='"for-test"' -I$(srcdir) \
++	  $(shell cat $(srcdir)/COPYRIGHT_YEARS)
+ 
+ min:
+ 	$(CC) $(TEST_SRC)/min.c $(TEST_SRC)/min-2.c -o $@ -g
+@@ -79,6 +82,19 @@ varval:
+ 	$(CC) $(TEST_SRC)/varval.c $(TEST_SRC)/varval.S -g -o $@ \
+ 	    || touch $@
+ 
++POINTER_SIZE:=$(shell $(CC) $(TEST_SRC)/pointer-size.c -o pointer-size; \
++	./pointer-size; \
++	rm -f ./pointer-size)
++
++TEMP_ASM_FILES=$(addsuffix -dw.S, $(TEST_EXECS_DWARF_ASM))
++.INTERMEDIATE: $(TEMP_ASM_FILES)
++
++$(TEMP_ASM_FILES): %-dw.S: $(TEST_SRC)/../lib/%.exp
++	export POINTER_SIZE=$(POINTER_SIZE); \
++	  runtest --tool=dwz -srcdir $(srcdir)/testsuite/ lib/$*.exp
++
++$(TEST_EXECS_DWARF_ASM): %: %-dw.S
++	$(CC) $(TEST_SRC)/main.c $< -o $@
+ 
+ # On some systems we need to set and export DEJAGNU to suppress
+ # WARNING: Couldn't find the global config file.
+diff --git a/contrib/bytes-per-die.sh b/contrib/bytes-per-die.sh
+new file mode 100755
+index 0000000..969f733
+--- /dev/null
++++ b/contrib/bytes-per-die.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash
++
++f="$1"
++
++size=$(readelf -WS "$f" \
++	   | egrep "[ \t]\.debug_info" \
++	   | sed 's/.*\.debug_info//' \
++	   | awk '{print $4}')
++size=$((16#$size))
++
++nr_dies=$(readelf -wi "$f" \
++	      | grep -c ': Abbrev Number.*(DW_TAG')
++
++res=$(echo "scale=2; $size / $nr_dies" \
++	  | bc)
++echo -e "$res\tsize: $size\tnr_dies: $nr_dies"
+diff --git a/contrib/gen-dwz-debug-all.sh b/contrib/gen-dwz-debug-all.sh
+new file mode 100755
+index 0000000..943062c
+--- /dev/null
++++ b/contrib/gen-dwz-debug-all.sh
+@@ -0,0 +1,28 @@
++#!/bin/sh
++
++outputfile=dwz.debug_all
++
++echo "
++  int
++  main (void)
++  {
++    return 0;
++  }
++" \
++    | gcc -x c - -c -o $outputfile
++
++sections="
++  debug_abbrev
++  debug_info
++  debug_line
++  debug_macro
++  debug_str
++"
++
++for section in $sections; do
++    file=dwz.$section
++
++    objcopy \
++	--add-section .$section=$file \
++       $outputfile
++done
+diff --git a/contrib/release/copyright-lines.awk b/contrib/release/copyright-lines.awk
+new file mode 100644
+index 0000000..b031c50
+--- /dev/null
++++ b/contrib/release/copyright-lines.awk
+@@ -0,0 +1,27 @@
++BEGIN {
++    start=0
++}
++
++/Copyright \(C\).*[.]/ {
++    print
++    next
++}
++
++/Copyright \(C\)/ {
++    start=1
++    printf $0
++    next
++}
++
++/[.]/ {
++    if (start == 0)
++	next
++    print
++    start=0
++}
++
++// {
++    if (start == 0)
++	next
++    printf $0
++}
+diff --git a/do-release.sh b/contrib/release/do-release.sh
+similarity index 100%
+rename from do-release.sh
+rename to contrib/release/do-release.sh
+diff --git a/contrib/release/gen-copyright-years.sh b/contrib/release/gen-copyright-years.sh
+new file mode 100755
+index 0000000..d081cd2
+--- /dev/null
++++ b/contrib/release/gen-copyright-years.sh
+@@ -0,0 +1,162 @@
++#!/bin/bash
++
++this=$(basename $0)
++
++max ()
++{
++    local a
++    a=$1
++    local b
++    b=$2
++
++    if [ "$a" = "" ]; then
++	echo "$b"
++	return
++    elif [ "$b" = "" ]; then
++	echo "$a"
++	return
++    fi
++
++    if [ $a -gt $b ]; then
++        echo "$a"
++    else
++        echo "$b"
++    fi
++}
++
++min ()
++{
++    local a
++    a="$1"
++    local b
++    b="$2"
++
++    if [ "$a" = "" ]; then
++	echo "$b"
++	return
++    elif [ "$b" = "" ]; then
++	echo "$a"
++	return
++    fi
++
++    if [ $a -lt $b ]; then
++        echo "$a"
++    else
++        echo "$b"
++    fi
++}
++
++print_range () {
++    local a
++    a="$1"
++    local b
++    b="$2"
++
++    if [ "$a" = "$b" ]; then
++	echo "$a"
++	return
++    fi
++    echo "$a-$b"
++}
++
++process_line ()
++{
++    local line
++    line="$1"
++
++    fsf=false
++    rh=false
++    suse=false;
++
++    if echo "$line" \
++	    | grep -q "Free Software Foundation, Inc\."; then
++	fsf=true
++	who=fsf
++	line=$(echo "$line" \
++		   | sed 's/Free Software Foundation, Inc\.//')
++    elif echo "$line" \
++	    | grep -q "Red Hat, Inc\."; then
++	rh=true
++	who=rh
++	line=$(echo "$line" \
++		   | sed 's/Red Hat, Inc\.//')
++    elif echo "$line" \
++	    | grep -q "SUSE LLC\."; then
++	suse=true
++	who=suse
++	line=$(echo "$line" \
++		   | sed 's/SUSE LLC\.//')
++    else
++	echo "error: unknown copyright: $line"
++	exit 1
++    fi
++
++    line=$(echo "$line" \
++	       | sed 's/[,-]/ /g')
++    max_year=$(echo "$line" \
++		   | sed 's/ /\n/g' \
++		   | grep -v '^$' \
++		   | sort -n -r \
++		   | head -n 1)
++    min_year=$(echo "$line" \
++		   | sed 's/ /\n/g' \
++		   | grep -v '^$' \
++		   | sort -n \
++		   | head -n 1)
++
++    if $fsf; then
++	fsf_max=$(max "$fsf_max" "$max_year")
++	fsf_min=$(min "$fsf_min" "$min_year")
++    elif $rh; then
++	rh_max=$(max "$rh_max" "$max_year")
++	rh_min=$(min "$rh_min" "$min_year")
++    elif $suse; then
++	suse_max=$(max "$suse_max" "$max_year")
++	suse_min=$(min "$suse_min" "$min_year")
++    fi
++}
++
++main ()
++{
++    if ! git status --ignored 2>&1 \
++	   | grep -q "nothing to commit, working tree clean"; then
++	echo "Git tree not clean"
++	exit 1
++    fi
++
++    local tmp
++    tmp=$(mktemp)
++
++    for f in *.c *.h *.def; do
++	if ! grep -q "Copyright (C)" $f; then
++	    echo "error: found file without copyright marker: $f"
++	    exit 1
++	fi
++
++	echo processing file: $f
++
++	grep -v '"' $f \
++	    | awk -f contrib/release/copyright-lines.awk \
++		  > $tmp
++
++	while read line; do
++	    line=$(echo "$line" \
++		       | sed 's/  */ /g')
++	    line=$(echo "$line" \
++		       | sed 's/.*Copyright (C) *//')
++	    echo "Processing line: $line"
++	    process_line "$line"
++	done < $tmp
++    done
++
++    rm -f $tmp
++
++    echo "-DFSF_YEARS='\"$(print_range $fsf_min $fsf_max)\"'" \
++	 > COPYRIGHT_YEARS
++    echo "-DRH_YEARS='\"$(print_range $rh_min $rh_max)\"'" \
++	 >> COPYRIGHT_YEARS
++    echo "-DSUSE_YEARS='\"$(print_range $suse_min $suse_max)\"'" \
++	 >> COPYRIGHT_YEARS
++}
++
++main "$@"
+diff --git a/contrib/release/upload-release.sh b/contrib/release/upload-release.sh
+new file mode 100755
+index 0000000..e5f6d70
+--- /dev/null
++++ b/contrib/release/upload-release.sh
+@@ -0,0 +1,67 @@
++#!/bin/sh -x
++
++set -e
++
++pwd=$(pwd -P)
++
++version="$1"
++
++tag=dwz-$version
++rootdir=dwz
++tarfile=dwz-$version.tar
++server=sourceware.org
++ftpdir=/sourceware/ftp/pub/dwz/releases
++# The server itself seems to add a sha512.sum file, so lets not duplicate that
++# effort.
++#checksums="md5sum sha512sum"
++checksums="md5sum"
++
++repo="$pwd"
++
++dir=$(mktemp -d)
++
++cd $dir
++git clone \
++    $repo \
++    $rootdir
++
++cd $dir/$rootdir
++git ch $tag
++
++rm -Rf .git
++
++cd $dir
++tar cvf \
++    $tarfile \
++    $rootdir
++
++xz \
++    --best \
++    -k \
++    $tarfile
++
++gzip \
++    --best \
++    -k \
++    $tarfile
++
++files=$(echo $tarfile.*)
++
++[ "$files" != "" ]
++
++ssh $server \
++    "mkdir -p $ftpdir"
++
++scp \
++    $files \
++    "$server:$ftpdir"
++
++ssh $server \
++    "cd $ftpdir && chmod 644 $files"
++
++for checksum in $checksums; do
++    ssh $server \
++	"cd $ftpdir && touch $checksum && chmod 644 $checksum && ( $checksum $files >> $checksum )"
++done
++
++rm -Rf $dir
+diff --git a/dwz.1 b/dwz.1
+index f3c38fc..a5a1ef6 100644
+--- a/dwz.1
++++ b/dwz.1
+@@ -71,7 +71,7 @@ or shared library (if there are no arguments at all,
+ \fIa.out\fR
+ is assumed).
+ .TP
+-.B \-l COUNT \-\-low\-mem\-die\-limit COUNT
++.B \-l <COUNT|none> \-\-low\-mem\-die\-limit <COUNT|none>
+ Handle executables or shared libraries containing more than
+ \fICOUNT\fR debugging information entries in their \fI.debug_info\fR
+ section using a slower and more memory usage friendly mode and don't
+@@ -80,12 +80,13 @@ The default is 10 million DIEs.  There is a risk that for very large
+ amounts of debugging information in a single shared library or executable
+ there might not be enough memory (especially when \fBdwz\fR
+ tool is 32-bit binary, it might run out of available virtual address
+-space even sooner).
++space even sooner).  Specifying none as argument disables the limit.
+ .TP
+-.B \-L COUNT \-\-max\-die\-limit COUNT
++.B \-L <COUNT|none> \-\-max\-die\-limit <COUNT|none>
+ Don't attempt to optimize executables or shared libraries
+ containing more than
+-\fICOUNT\fR DIEs at all.  The default is 50 million DIEs.
++\fICOUNT\fR DIEs at all.  The default is 50 million DIEs.  Specifying none as
++argument disables the limit.
+ .TP
+ .B \-? \-\-help
+ Print short help and exit.
+diff --git a/dwz.c b/dwz.c
+index 266f56d..313c317 100644
+--- a/dwz.c
++++ b/dwz.c
+@@ -28,6 +28,7 @@
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <stdint.h>
++#include <inttypes.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <sys/mman.h>
+@@ -117,10 +118,17 @@
+ 
+ #if defined __GNUC__
+ # define FORCE_INLINE __attribute__((always_inline))
++# define UNUSED __attribute__((unused))
++# define USED __attribute__((used))
+ #else
+ # define FORCE_INLINE
++# define UNUSED
++# define USED
+ #endif
+ 
++/* Utility macro.  */
++#define IMPLIES(A, B) (!((A) && !(B)))
++
+ #define obstack_chunk_alloc     malloc
+ #define obstack_chunk_free      free
+ 
+@@ -150,11 +158,26 @@ static struct obstack alt_ob, alt_ob2;
+ static int tracing;
+ static int ignore_size;
+ static int ignore_locus;
++static int dump_dies_p;
++static int dump_dups;
+ #else
+ #define tracing 0
+ #define ignore_size 0
+ #define ignore_locus 0
++#define dump_dies_p 0
++#define dump_dups 0
+ #endif
++static int unoptimized_multifile;
++static int save_temps = 0;
++static int verify_edges_p = 0;
++static int dump_edges_p = 0;
++static int partition_dups_opt;
++enum die_count_methods
++{
++  none,
++  estimate
++};
++static enum die_count_methods die_count_method = estimate;
+ 
+ typedef struct
+ {
+@@ -674,6 +697,9 @@ struct dw_cu
+   unsigned int cu_chunk;
+   /* Form chosen for intra-cu references.  */
+   enum dwarf_form cu_intracu_form;
++  /* Intracusize argument to init_new_die_offsets.  Set in compute_abbrevs,
++     used in recompute_abbrevs.  */
++  unsigned int initial_intracusize;
+ };
+ 
+ /* Internal representation of a debugging information entry (DIE).
+@@ -794,6 +820,8 @@ struct dw_die
+   dw_die_ref die_nextdup;
+ };
+ 
++#include "iterators.h"
++
+ /* Return CU structure pointer for a DIE.  In order to save memory,
+    individual DIEs don't have a dw_cu_ref field, and the pointer can
+    be only found by overriding the die_parent pointer in a
+@@ -1176,13 +1204,85 @@ read_debug_line (DSO *dso, dw_cu_ref cu, uint32_t off)
+   return 0;
+ }
+ 
++/* Estimate the amount of DIEs in the .debug_info section, based on the size
++   of that section.  */
++static unsigned int UNUSED
++estimate_nr_dies (void)
++{
++  unsigned int average_die_size = 11;
++  unsigned int nr_dies = debug_sections[DEBUG_INFO].size / average_die_size;
++  return nr_dies;
++}
++
++static size_t UNUSED
++emulate_htab (size_t initial, size_t final_nr_elements)
++{
++  size_t size = initial;
++
++  /* Emulate creation.  */
++  size = higher_prime_number (size);
++
++  /* Emulate growing till htab contains find_nr_elements.  */
++  while (1)
++    {
++      /* Emulate expansion trigger.  */
++      size_t nr_elements = size * 3 / 4;
++      while (!(size * 3 <= nr_elements * 4))
++	nr_elements++;
++
++      if (nr_elements > final_nr_elements)
++	{
++	  nr_elements = final_nr_elements;
++	  break;
++	}
++
++      /* Emulate expansion.  */
++      size = size * 2;
++      size = higher_prime_number (size);
++    }
++
++  return size;
++}
++
++/* Print hash table statistics for hash table HTAB with message string MSG.  */
++static void
++htab_report (htab_t htab, const char *msg)
++{
++  double collisions = htab_collisions (htab);
++  unsigned int searches = htab->searches;
++  size_t elements = htab->n_elements;
++  size_t deleted = htab->n_deleted;
++  size_t adjusted_elements = elements - deleted;
++  size_t size = htab->size;
++  double occupancy = (double)elements / (double)size;
++  double adjusted_occupancy = (double)adjusted_elements / (double)size;
++  /* Indent unconditional fprintfs similar to conditional fprintfs to
++     left-align literal strings.  */
++  if (1)
++    fprintf (stderr, "htab: %s\n", msg);
++  if (1)
++    fprintf (stderr, "      size: %zu\n", size);
++  if (elements > 0 && deleted == 0)
++    fprintf (stderr, "      elements: %zu, occupancy: %f\n", elements,
++	     occupancy);
++  if (deleted > 0)
++    fprintf (stderr, "      elements (incl. deleted): %zu, occupancy: %f\n",
++	     elements, occupancy);
++  if (deleted > 0)
++    fprintf (stderr, "      elements (excl. deleted): %zu, occupancy: %f\n",
++	     adjusted_elements, adjusted_occupancy);
++  if (elements > 0)
++    fprintf (stderr, "      searches: %u, collisions: %f\n", searches,
++	     collisions);
++}
++
+ /* Hash function for off_htab hash table.  */
+ static hashval_t
+ off_hash (const void *p)
+ {
+   dw_die_ref die = (dw_die_ref) p;
+ 
+-  return die->die_offset;
++  return die->die_offset / 6;
+ }
+ 
+ /* Equality function for off_htab hash table.  */
+@@ -1205,7 +1305,7 @@ static htab_t types_off_htab;
+ /* Function to add DIE into the hash table (and create the hash table
+    when not already created).  */
+ static void
+-off_htab_add_die (dw_cu_ref cu, dw_die_ref die)
++off_htab_add_die (dw_cu_ref cu, dw_die_ref die, unsigned int *die_count)
+ {
+   void **slot;
+ 
+@@ -1228,14 +1328,57 @@ off_htab_add_die (dw_cu_ref cu, dw_die_ref die)
+ 
+   if (off_htab == NULL)
+     {
+-      off_htab = htab_try_create (100000, off_hash, off_eq, NULL);
++      unsigned int estimated_nr_dies = estimate_nr_dies ();
++      size_t default_initial_size = 100000;
++      size_t initial_size;
++      if (low_mem
++	  || op_multifile
++	  || (multifile_mode == 0
++	      && die_count_method == estimate
++	      && (estimated_nr_dies >= low_mem_die_limit
++		  || estimated_nr_dies >= max_die_limit)))
++	initial_size = default_initial_size;
++      else
++	{
++	  size_t nr_dies;
++	  if (die_count && *die_count != 0)
++	    {
++	      nr_dies = *die_count;
++	      if (tracing)
++		fprintf (stderr, "Using die count %zu for off_htab"
++			 " allocation\n", nr_dies);
++	    }
++	  else if (die_count_method == none)
++	    nr_dies = 0;
++	  else if (die_count_method == estimate)
++	    {
++	      nr_dies = estimated_nr_dies;
++	      if (tracing)
++		fprintf (stderr, "Using die count estimate %zu for off_htab"
++			 " allocation\n", nr_dies);
++	    }
++	  else
++	    assert (false);
++
++	  if (nr_dies != 0)
++	    {
++	      size_t final_hashtab_size
++		= emulate_htab (default_initial_size, nr_dies);
++	      initial_size = final_hashtab_size;
++	    }
++	  else
++	    initial_size = default_initial_size;
++	}
++      off_htab = htab_try_create (initial_size, off_hash, off_eq, NULL);
++      if (tracing)
++	htab_report (off_htab, "off_htab allocation");
+       if (off_htab == NULL)
+ 	dwz_oom ();
+       if (rd_multifile)
+ 	alt_off_htab = off_htab;
+     }
+ 
+-  slot = htab_find_slot_with_hash (off_htab, die, die->die_offset, INSERT);
++  slot = htab_find_slot_with_hash (off_htab, die, off_hash (die), INSERT);
+   if (slot == NULL)
+     dwz_oom ();
+   assert (*slot == NULL);
+@@ -1251,26 +1394,29 @@ off_htab_lookup (dw_cu_ref cu, unsigned int die_offset)
+   struct dw_die die;
+   die.die_offset = die_offset;
+   if (cu == NULL)
+-    return (dw_die_ref) htab_find_with_hash (off_htab, &die, die_offset);
++    return (dw_die_ref) htab_find_with_hash (off_htab, &die, off_hash (&die));
+   if (unlikely (cu->cu_kind == CU_ALT))
+-    return (dw_die_ref) htab_find_with_hash (alt_off_htab, &die, die_offset);
++    return (dw_die_ref) htab_find_with_hash (alt_off_htab, &die,
++					     off_hash (&die));
+   if (unlikely (cu->cu_kind == CU_TYPES))
+-    return (dw_die_ref) htab_find_with_hash (types_off_htab, &die, die_offset);
+-  return (dw_die_ref) htab_find_with_hash (off_htab, &die, die_offset);
++    return (dw_die_ref) htab_find_with_hash (types_off_htab, &die,
++					     off_hash (&die));
++  return (dw_die_ref) htab_find_with_hash (off_htab, &die, off_hash (&die));
+ }
+ 
+ /* For a die attribute with form FORM starting at PTR, with the die in CU,
+    return the pointer after the attribute, assuming FORM is not
+    dw_form_indirect.  */
+ static inline unsigned char * FORCE_INLINE
+-skip_attr_no_dw_form_indirect (dw_cu_ref cu, uint32_t form, unsigned char *ptr)
++skip_attr_no_dw_form_indirect (unsigned int cu_version, uint32_t form,
++			       unsigned char *ptr)
+ {
+   size_t len = 0;
+ 
+   switch (form)
+     {
+     case DW_FORM_ref_addr:
+-      ptr += cu->cu_version == 2 ? ptr_size : 4;
++      ptr += cu_version == 2 ? ptr_size : 4;
+       break;
+     case DW_FORM_addr:
+       ptr += ptr_size;
+@@ -1336,13 +1482,14 @@ skip_attr_no_dw_form_indirect (dw_cu_ref cu, uint32_t form, unsigned char *ptr)
+ /* For a die attribute ATTR starting at PTR, with the die in CU, return the
+    pointer after the attribute.  */
+ static inline unsigned char * FORCE_INLINE
+-skip_attr (dw_cu_ref cu, struct abbrev_attr *attr, unsigned char *ptr)
++skip_attr (unsigned int cu_version, struct abbrev_attr *attr,
++	   unsigned char *ptr)
+ {
+   uint32_t form = attr->form;
+ 
+   while (form == DW_FORM_indirect)
+     form = read_uleb128 (ptr);
+-  return skip_attr_no_dw_form_indirect (cu, form, ptr);
++  return skip_attr_no_dw_form_indirect (cu_version, form, ptr);
+ }
+ 
+ /* Return a pointer at which DIE's attribute AT is encoded, and fill in
+@@ -1374,7 +1521,7 @@ get_AT (dw_die_ref die, enum dwarf_attribute at, enum dwarf_form *formp)
+ 	  return ptr;
+ 	}
+ 
+-      ptr = skip_attr_no_dw_form_indirect (cu, form, ptr);
++      ptr = skip_attr_no_dw_form_indirect (cu->cu_version, form, ptr);
+     }
+   return NULL;
+ }
+@@ -1719,12 +1866,13 @@ add_dummy_die (dw_cu_ref cu, unsigned int offset)
+     {
+       ref = pool_alloc (dw_die, offsetof (struct dw_die, die_child));
+       memcpy (ref, &ref_buf, offsetof (struct dw_die, die_child));
+-      off_htab_add_die (cu, ref);
++      off_htab_add_die (cu, ref, NULL);
+       return;
+     }
+ 
+   slot
+-    = htab_find_slot_with_hash (off_htab, &ref_buf, ref_buf.die_offset, INSERT);
++    = htab_find_slot_with_hash (off_htab, &ref_buf, off_hash (&ref_buf),
++				INSERT);
+   if (slot == NULL)
+     dwz_oom ();
+   if (*slot != NULL)
+@@ -2155,16 +2303,20 @@ read_loclist (DSO *dso, dw_die_ref die, GElf_Addr offset)
+ }
+ 
+ /* This function computes u.p1.die_hash and die_ck_state of DIE.
+-   u.p1.die_hash is an iterative hash of the die_tag, for all its attributes
+-   except DW_AT_sibling the attribute code, for non-reference class
+-   attributes or DW_FORM_ref_addr attributes the value of the attribute
+-   (magic for DW_AT_*_file), for reference class attributes that point
+-   into the subtree of TOP_DIE ref->u.p1.die_enter - top_die->u.p1.die_enter
+-   (note, other references are intentionally ignored here) and hashes
+-   of all its children.  die_ck_state is set to CK_BAD if the die is
+-   unsuitable for moving into a partial unit (contains code references
+-   or other reasons).  TOP_DIE is initially NULL when DW_TAG_*_unit or
+-   die_named_namespace dies are walked.  */
++   The field u.p1.die_hash is an iterative hash of:
++   - the die_tag,
++   - for all attributes except DW_AT_sibling: the attribute code,
++   - for non-reference class attributes: the value of the attribute (magic
++     for DW_AT_*_file),
++   - for DW_FORM_ref_addr attributes: the value of the attribute,
++   - for reference class attributes that point into the subtree of TOP_DIE
++     (note, other references are intentionally ignored here):
++     ref->u.p1.die_enter - top_die->u.p1.die_enter,
++   - for all children: their hashes.
++   The field die_ck_state is set to CK_BAD if the die is unsuitable for
++   moving into a partial unit (contains code references or other reasons).
++   TOP_DIE is initially NULL when DW_TAG_*_unit or die_named_namespace dies
++   are walked.  */
+ static int
+ checksum_die (DSO *dso, dw_cu_ref cu, dw_die_ref top_die, dw_die_ref die)
+ {
+@@ -3099,18 +3251,26 @@ static dw_die_ref die_nontoplevel_freelist;
+    fields.  */
+ static dw_die_ref die_collapsed_child_freelist;
+ 
+-/* Return pointer after the attributes of a DIE from CU which uses abbrevs
+-   T and starts at PTR.  */
++/* Return pointer after the attributes of a DIE from a cu with CU_VERSION
++   which uses abbrevs T and starts at PTR.  */
+ static unsigned char *
+-skip_attrs (dw_cu_ref cu, struct abbrev_tag *t, unsigned char *ptr)
++skip_attrs_1 (unsigned int cu_version, struct abbrev_tag *t, unsigned char *ptr)
+ {
+   unsigned int i;
+   for (i = 0; i < t->nattr; ++i)
+-    ptr = skip_attr (cu, &t->attr[i], ptr);
++    ptr = skip_attr (cu_version, &t->attr[i], ptr);
+ 
+   return ptr;
+ }
+ 
++/* Return pointer after the attributes of a DIE from CU which uses abbrevs
++   T and starts at PTR.  */
++static unsigned char *
++skip_attrs (dw_cu_ref cu, struct abbrev_tag *t, unsigned char *ptr)
++{
++  return skip_attrs_1 (cu->cu_version, t, ptr);
++}
++
+ /* Expand children of TOP_DIE that have been collapsed by
+    collapse_child.  CHECKSUM is true if checksum should be
+    computed - expansion is performed during read_debug_info
+@@ -3163,7 +3323,7 @@ expand_child (dw_die_ref top_die, bool checksum)
+       diebuf.die_offset = die_offset;
+       slot = htab_find_slot_with_hash (cu->cu_kind == CU_TYPES
+ 				       ? types_off_htab : off_htab,
+-				       &diebuf, die_offset, NO_INSERT);
++				       &diebuf, off_hash (&diebuf), NO_INSERT);
+       if (slot == NULL)
+ 	die = NULL;
+       else
+@@ -3975,21 +4135,125 @@ find_dups_fi (dw_die_ref parent)
+   return 0;
+ }
+ 
+-#ifdef DEBUG_DUMP_DIES
+-/* Debugging helper function to dump hash values to stdout.  */
++/* Return value of DW_AT_name for DIE, or for its specification or abstract
++   origin.  */
++static const char *
++get_name (dw_die_ref die)
++{
++  const char *name = get_AT_string (die, DW_AT_name);
++  if (name)
++    return name;
++  dw_cu_ref cu = die_cu (die);
++  bool present;
++  enum dwarf_form form;
++  unsigned int value = get_AT_int (die, DW_AT_specification, &present, &form);
++  if (present)
++    {
++      dw_die_ref ref;
++      if (form != DW_FORM_ref_addr)
++	value = cu->cu_offset + value;
++      ref = off_htab_lookup (cu, value);
++      if (ref)
++	return get_name (ref);
++    }
++  value = get_AT_int (die, DW_AT_abstract_origin, &present, &form);
++  if (present)
++    {
++      dw_die_ref ref;
++      if (form != DW_FORM_ref_addr)
++	value = cu->cu_offset + value;
++      ref = off_htab_lookup (die_cu (die), value);
++      if (ref)
++	return get_name (ref);
++    }
++  return NULL;
++}
++
++/* Dump type of DIE to stderr.  */
++static void
++dump_type (dw_die_ref die)
++{
++  bool present;
++  enum dwarf_form form;
++  if (die->die_collapsed_child)
++    return;
++  unsigned int value = get_AT_int (die, DW_AT_type, &present, &form);
++  if (!present)
++    return;
++
++  dw_cu_ref cu = die_cu (die);
++  if (cu == NULL)
++    return;
++
++  dw_die_ref ref;
++  if (form != DW_FORM_ref_addr)
++    value = cu->cu_offset + value;
++  fprintf (stderr, " (type: %x", value);
++  ref = off_htab_lookup (cu, value);
++  if (ref != NULL && !ref->die_collapsed_child)
++    {
++      const char *type_name = get_name (ref);
++      if (type_name)
++	fprintf (stderr, " %s", type_name);
++      fprintf (stderr, " %s", get_DW_TAG_name (ref->die_tag) + 7);
++      dump_type (ref);
++    }
++  fprintf (stderr, ")");
++}
++
++/* Dump DIE to stderr with INDENT.  */
++static void
++dump_die_with_indent (int indent, dw_die_ref die)
++{
++  if (die == NULL)
++    fprintf (stderr, "%*s null", indent, "");
++  else if (die->die_offset == -1U)
++    {
++      fprintf (stderr, "%*s -1 %s", indent, "",
++	       get_DW_TAG_name (die->die_tag) + 7);
++      dw_die_ref d = die->die_nextdup;
++      while (d)
++	{
++	  const char *name = get_name (d);
++	  fprintf (stderr, " -> %x %s %s", d->die_offset, name ? name : "",
++		   get_DW_TAG_name (d->die_tag) + 7);
++	  d = d->die_nextdup;
++	}
++    }
++  else if (die->die_collapsed_child)
++    {
++      fprintf (stderr, "%*s %x %c", indent, "", die->die_offset,
++	   die->die_ck_state == CK_KNOWN ? 'O' : 'X');
++    }
++  else
++    {
++      const char *name = get_name (die);
++      fprintf (stderr, "%*s %x %c %x %x %s %s", indent, "", die->die_offset,
++	       die->die_ck_state == CK_KNOWN ? 'O' : 'X',
++	       (unsigned) die->u.p1.die_hash,
++	       (unsigned) die->u.p1.die_ref_hash, name ? name : "",
++	       get_DW_TAG_name (die->die_tag) + 7);
++      dump_type (die);
++    }
++  fprintf (stderr, "\n");
++}
++
++/* Dump DIE to stderr.  */
++void USED
++dump_die (dw_die_ref die)
++{
++  dump_die_with_indent (0, die);
++}
++
++/* Dump DIE tree at tree depth DEPTH.  */
+ static void
+ dump_dies (int depth, dw_die_ref die)
+ {
+   dw_die_ref child;
+-  const char *name = get_AT_string (die, DW_AT_name);
+-  printf ("%*s %x %c %x %x %s\n", depth, "", die->die_offset,
+-	  die->die_ck_state == CK_KNOWN ? 'O' : 'X',
+-	  (unsigned) die->u.p1.die_hash,
+-	  (unsigned) die->u.p1.die_ref_hash, name ? name : "");
++  dump_die_with_indent (depth, die);
+   for (child = die->die_child; child; child = child->die_sib)
+     dump_dies (depth + 1, child);
+ }
+-#endif
+ 
+ /* Hash table for .debug_str.  Depending on multifile optimization
+    phase this hash table has 3 different hash/equality functions.
+@@ -3998,7 +4262,7 @@ dump_dies (int depth, dw_die_ref die)
+    plus then all the strings which are just suffixes of other
+    strings.  E.g. if .debug_str section contains "foobar" string
+    and .debug_info section refers to the whole "foobar" string
+-   as well as "bar" by refering to "foobar" + 3.
++   as well as "bar" by referring to "foobar" + 3.
+    The second set is used during op_multifile and fi_multifile,
+    noting each string and in addition to that how many times it
+    has been seen (0, 1 or more than 1).  If 0 then it isn't present
+@@ -4622,7 +4886,7 @@ remove_dies (dw_cu_ref cu, dw_die_ref die, bool remove)
+   if (die->die_referenced == 0)
+     {
+       htab_t h = cu->cu_kind == CU_TYPES ? types_off_htab : off_htab;
+-      void **slot = htab_find_slot_with_hash (h, die, die->die_offset,
++      void **slot = htab_find_slot_with_hash (h, die, off_hash (die),
+ 					      NO_INSERT);
+       if (slot != NULL)
+ 	htab_clear_slot (h, slot);
+@@ -4758,7 +5022,7 @@ collapse_child (dw_cu_ref cu, dw_die_ref top_die, dw_die_ref die,
+ 	  ref->die_tag = tick_diff;
+ 	  slot = htab_find_slot_with_hash (cu->cu_kind == CU_TYPES
+ 					   ? types_off_htab : off_htab,
+-					   ref, ref->die_offset, NO_INSERT);
++					   ref, off_hash (ref), NO_INSERT);
+ 	  assert (slot != NULL);
+ 	  *slot = (void *) ref;
+ 	  memset (die, '\0', offsetof (struct dw_die, die_dup));
+@@ -4800,12 +5064,158 @@ collapse_children (dw_cu_ref cu, dw_die_ref die)
+       }
+ }
+ 
++/* Count the number of DIEs in the .debug_info section, and see if we run into
++   some limit.  */
++static int
++try_debug_info (DSO *dso)
++{
++  unsigned char *ptr, *endcu, *endsec;
++  unsigned int value;
++  htab_t abbrev = NULL;
++  unsigned int last_abbrev_offset = 0;
++  struct abbrev_tag tag, *t;
++  unsigned int ndies;
++  unsigned ret = 1;
++  int kind = DEBUG_INFO;
++  bool low_mem_die_limit_hit = false;
++
++  if (tracing)
++    fprintf (stderr, "Counting DIEs\n");
++
++  ndies = 0;
++  ptr = debug_sections[kind].data;
++  endsec = ptr + debug_sections[kind].size;
++  while (ptr < endsec)
++    {
++      unsigned int culen;
++      int cu_version;
++
++      if (ptr + (kind == DEBUG_TYPES ? 23 : 11) > endsec)
++	{
++	  error (0, 0, "%s: %s CU header too small", dso->filename,
++		 debug_sections[kind].name);
++	  goto fail;
++	}
++
++      endcu = ptr + 4;
++      culen = read_32 (ptr);
++      if (culen >= 0xfffffff0)
++	{
++	  error (0, 0, "%s: 64-bit DWARF not supported", dso->filename);
++	  goto fail;
++	}
++      endcu += culen;
++
++      if (endcu > endsec)
++	{
++	  error (0, 0, "%s: %s too small", dso->filename,
++		 debug_sections[kind].name);
++	  goto fail;
++	}
++
++      cu_version = read_16 (ptr);
++      if (cu_version < 2 || cu_version > 4)
++	{
++	  error (0, 0, "%s: DWARF version %d unhandled", dso->filename,
++		 cu_version);
++	  goto fail;
++	}
++
++      value = read_32 (ptr);
++      if (value >= debug_sections[DEBUG_ABBREV].size)
++	{
++	  if (debug_sections[DEBUG_ABBREV].data == NULL)
++	    error (0, 0, "%s: .debug_abbrev not present", dso->filename);
++	  else
++	    error (0, 0, "%s: DWARF CU abbrev offset too large",
++		   dso->filename);
++	  goto fail;
++	}
++
++      if (ptr_size == 0)
++	{
++	  ptr_size = read_8 (ptr);
++	  if (ptr_size != 4 && ptr_size != 8)
++	    {
++	      error (0, 0, "%s: Invalid DWARF pointer size %d",
++		     dso->filename, ptr_size);
++	      goto fail;
++	    }
++	}
++      else if (read_8 (ptr) != ptr_size)
++	{
++	  error (0, 0, "%s: DWARF pointer size differs between CUs",
++		 dso->filename);
++	  goto fail;
++	}
++
++      if (abbrev == NULL || value != last_abbrev_offset)
++	{
++	  if (abbrev)
++	    htab_delete (abbrev);
++	  abbrev
++	    = read_abbrev (dso, debug_sections[DEBUG_ABBREV].data + value);
++	  if (abbrev == NULL)
++	    goto fail;
++	}
++      last_abbrev_offset = value;
++
++      while (ptr < endcu)
++	{
++	  tag.entry = read_uleb128 (ptr);
++	  if (tag.entry == 0)
++	    continue;
++	  if (ndies == max_die_limit)
++	    {
++	      error (0, 0, "%s: Too many DIEs, not optimizing",
++		     dso->filename);
++	      goto fail;
++	    }
++	  /* If we reach the DIE limit, signal the dwz caller that it
++	     should retry with low_mem.  */
++	  if (likely (!low_mem) && ndies == low_mem_die_limit)
++	    {
++	      if (tracing)
++		fprintf (stderr, "Hit low-mem die-limit\n");
++	      if (estimate_nr_dies () > max_die_limit)
++		/* Keep going, we still might hit the max die-limit.  */
++		low_mem_die_limit_hit = true;
++	      else
++		{
++		  ret = 2;
++		  goto fail;
++		}
++	    }
++	  ndies++;
++	  t = htab_find_with_hash (abbrev, &tag, tag.entry);
++	  if (t == NULL)
++	    {
++	      error (0, 0, "%s: Could not find DWARF abbreviation %d",
++		     dso->filename, tag.entry);
++	      goto fail;
++	    }
++	  ptr = skip_attrs_1 (cu_version, t, ptr);
++	}
++    }
++
++  if (low_mem_die_limit_hit)
++    ret = 2;
++  else
++    ret = 0;
++
++ fail:
++  if (abbrev)
++    htab_delete (abbrev);
++
++  return ret;
++}
++
+ /* First phase of the DWARF compression.  Parse .debug_info section
+    (for kind == DEBUG_INFO) or .debug_types section (for kind == DEBUG_TYPES)
+-   for each CU in it construct internal represetnation for the CU
++   for each CU in it construct internal representation for the CU
+    and its DIE tree, compute checksums of DIEs and look for duplicates.  */
+ static int
+-read_debug_info (DSO *dso, int kind)
++read_debug_info (DSO *dso, int kind, unsigned int *die_count)
+ {
+   unsigned char *ptr, *endcu, *endsec;
+   unsigned int value;
+@@ -4828,6 +5238,25 @@ read_debug_info (DSO *dso, int kind)
+   struct dw_cu cu_buf;
+   struct dw_die die_buf;
+ 
++  unsigned int estimated_nr_dies = estimate_nr_dies ();
++  if (kind == DEBUG_INFO
++      && multifile_mode == 0
++      && die_count_method == estimate)
++    {
++      bool do_count = (estimated_nr_dies > max_die_limit
++		       || estimated_nr_dies > low_mem_die_limit);
++      if (tracing)
++	fprintf (stderr, "Using die count estimate %u to decide whether to"
++		 " count DIEs: %s\n", estimated_nr_dies,
++		 do_count ? "yes" : "no");
++      if (do_count)
++	{
++	  int try_ret = try_debug_info (dso);
++	  if (try_ret != 0)
++	    return try_ret;
++	}
++    }
++
+   if (likely (!fi_multifile && kind != DEBUG_TYPES))
+     {
+       dup_htab = htab_try_create (100000, die_hash, die_eq, NULL);
+@@ -4934,10 +5363,9 @@ read_debug_info (DSO *dso, int kind)
+ 	      for (cu = cuf; cu; cu = cu->cu_next)
+ 		checksum_ref_die (cu, NULL, cu->cu_die, NULL, NULL);
+ 
+-#ifdef DEBUG_DUMP_DIES
+-	      for (cu = cuf; cu; cu = cu->cu_next)
+-		dump_dies (0, cu->cu_die);
+-#endif
++	      if (dump_dies_p)
++		for (cu = cuf; cu; cu = cu->cu_next)
++		  dump_dies (0, cu->cu_die);
+ 
+ 	      for (cu = cuf; cu; cu = cu->cu_next)
+ 		if (find_dups (cu->cu_die))
+@@ -5085,8 +5513,8 @@ read_debug_info (DSO *dso, int kind)
+ 		  ret = 2;
+ 		  goto fail;
+ 		}
+-	      ndies++;
+ 	    }
++	  ndies++;
+ 	  if (unlikely (low_mem_phase1))
+ 	    die = &die_buf;
+ 	  else if (parent == NULL
+@@ -5282,7 +5710,7 @@ read_debug_info (DSO *dso, int kind)
+ 	      if (off_htab != NULL && kind == DEBUG_INFO)
+ 		{
+ 		  void **slot
+-		    = htab_find_slot_with_hash (off_htab, die, die->die_offset,
++		    = htab_find_slot_with_hash (off_htab, die, off_hash (die),
+ 						INSERT);
+ 		  if (slot == NULL)
+ 		    dwz_oom ();
+@@ -5301,7 +5729,7 @@ read_debug_info (DSO *dso, int kind)
+ 		}
+ 	    }
+ 
+-	  off_htab_add_die (cu, die);
++	  off_htab_add_die (cu, die, die_count);
+ 	}
+ 
+       if (unlikely (low_mem_phase1))
+@@ -5354,9 +5782,8 @@ read_debug_info (DSO *dso, int kind)
+ 	    goto fail;
+ 	  checksum_ref_die (cu, NULL, cu->cu_die, NULL, NULL);
+ 
+-#ifdef DEBUG_DUMP_DIES
+-	  dump_dies (0, cu->cu_die);
+-#endif
++	  if (dump_dies_p)
++	    dump_dies (0, cu->cu_die);
+ 
+ 	  if (find_dups (cu->cu_die))
+ 	    goto fail;
+@@ -5425,10 +5852,9 @@ read_debug_info (DSO *dso, int kind)
+       for (cu = first_cu; cu; cu = cu->cu_next)
+ 	checksum_ref_die (cu, NULL, cu->cu_die, NULL, NULL);
+ 
+-#ifdef DEBUG_DUMP_DIES
+-      for (cu = first_cu; cu; cu = cu->cu_next)
+-	dump_dies (0, cu->cu_die);
+-#endif
++      if (dump_dies_p)
++	for (cu = first_cu; cu; cu = cu->cu_next)
++	  dump_dies (0, cu->cu_die);
+ 
+       if (rd_multifile)
+ 	{
+@@ -5444,6 +5870,18 @@ read_debug_info (DSO *dso, int kind)
+       return 0;
+     }
+ 
++  if (tracing)
++    {
++      if (op_multifile)
++	fprintf (stderr, "Die count: %u\n", ndies);
++      else
++	fprintf (stderr, "Die count: %u, %.2f%% of estimate\n", ndies,
++		 (double)ndies / ((double)estimated_nr_dies / 100));
++    }
++  if (tracing)
++    htab_report (off_htab, "off_htab post-parsing");
++  if (die_count)
++    *die_count = ndies;
+   htab_delete (dup_htab);
+   dup_htab = NULL;
+   return 0;
+@@ -5545,6 +5983,15 @@ partition_find_dups (struct obstack *vec, dw_die_ref parent)
+ 	    }
+ 	  child->die_nextdup = prev;
+ 	  obstack_ptr_grow (vec, child);
++	  if (dump_dups)
++	    {
++	      fprintf (stderr, "duplicate chain:\n");
++	      {
++		dw_die_ref d;
++		for (d = child; d; d = d->die_nextdup)
++		  dump_die (d);
++	      }
++	    }
+ 	}
+       else if (child->die_named_namespace)
+ 	partition_find_dups (vec, child);
+@@ -5667,7 +6114,8 @@ partition_dups_1 (dw_die_ref *arr, size_t vec_size,
+ 	 the same set of referrers, try to see if we can put also those
+ 	 into the partial unit.  They can be put there only if they
+ 	 don't refer to DIEs that won't be put into partial units.  */
+-      if (second_phase && force && force < j - k)
++      if (unlikely (partition_dups_opt)
++	  && second_phase && force && force < j - i)
+ 	{
+ 	  /* First optimistically assume all such DIEs can be put there,
+ 	     thus mark all such DIEs as going to be included, so that
+@@ -6017,36 +6465,123 @@ remove_import_edges (struct import_edge **ep, struct import_cu **cus,
+   return efirst;
+ }
+ 
+-#ifdef DEBUG_VERIFY_EDGES
++static void
++dump_edges_1 (struct import_cu *ipu)
++{
++  fprintf (stderr, "idx: %u\n", ipu->idx);
++  fprintf (stderr, "cu: 0x%x\n", ipu->cu->cu_offset);
++  struct import_edge *e1;
++  for (e1 = ipu->incoming; e1; e1 = e1->next)
++    fprintf (stderr, "incoming: %u\n", e1->icu->idx);
++  for (e1 = ipu->outgoing; e1; e1 = e1->next)
++    fprintf (stderr, "outgoing: %u\n", e1->icu->idx);
++}
++
++static void
++dump_edges (const char *msg, struct import_cu **ipus, unsigned int npus,
++	    unsigned int ncus)
++{
++  struct import_cu *ipu;
++  unsigned int i;
++  fprintf (stderr, "PRINT_EDGES: %s\n", msg);
++  fprintf (stderr, "PUs\n");
++  for (ipu = ipus[0]; ipu; ipu = ipu->next)
++    dump_edges_1 (ipu);
++  fprintf (stderr, "CUs\n");
++  for (i = 0; i < ncus; i++)
++    dump_edges_1 (ipus[i + npus]);
++}
++
++/* Enumerate the different kinds of nodes in the import_cu/import_edge
++   graph.  */
++enum node_kind { NODE_CU, NODE_PU_INITIAL, NODE_PU_NEW };
++
++/* Return the node kind for node IDX, given that:
++   - [0, NPUS - 1] are initial PUs,
++   - [NPUS, NPUS + NCUS - 1] are CUs, and
++   - [NPUS + NCUS, ] are new PUs.  */
++static enum node_kind
++get_node_kind (unsigned int idx, unsigned int npus, unsigned int ncus)
++{
++  if (idx < npus)
++    return NODE_PU_INITIAL;
++  if (idx < npus + ncus)
++    return NODE_CU;
++  return NODE_PU_NEW;
++}
++
++/* Verify an edge from SRC to DEST during create_import_tree phase PHASE.  */
++static void
++verify_edge (enum node_kind src, enum node_kind dest, unsigned int phase)
++{
++  if (phase == 1)
++    {
++      assert (src == NODE_CU && dest == NODE_PU_INITIAL);
++      return;
++    }
++
++  assert (IMPLIES (src == NODE_CU, dest != NODE_CU));
++
++  if (phase == 2)
++    {
++      assert (IMPLIES (src == NODE_PU_NEW, dest == NODE_PU_INITIAL));
++      assert (src != NODE_PU_INITIAL);
++    }
++  else
++    assert (IMPLIES (src == NODE_PU_NEW, dest != NODE_CU));
++}
++
+ /* Helper function for debugging create_import_tree.  Verify
+    various invariants for CU/PU IPU.  */
+ static void
+-verify_edges_1 (struct import_cu *ipu, unsigned int *ic, unsigned int *oc)
++verify_edges_1 (struct import_cu *ipu, unsigned int *ic, unsigned int *oc,
++		enum node_kind kind, unsigned int npus, unsigned int ncus,
++		unsigned int phase)
+ {
+   struct import_edge *e1, *e2;
+-  unsigned int last_idx = 0, count;
+-  for (e1 = ipu->incoming, count = 0; e1; e1 = e1->next)
++  unsigned int last_idx, count;
++  enum node_kind kind2;
++
++  for (last_idx = 0, count = 0, e1 = ipu->incoming;
++       e1;
++       last_idx = e1->icu->idx, count++, e1 = e1->next)
+     {
++      /* Verify that incoming edges are in ascending idx order.  */
+       assert (count == 0 || e1->icu->idx > last_idx);
+-      last_idx = e1->icu->idx;
+-      count++;
++
++      /* Verify that each incoming edge has a corresponding outgoing edge.  */
+       for (e2 = e1->icu->outgoing; e2; e2 = e2->next)
+ 	if (e2->icu == ipu)
+ 	  break;
+       assert (e2);
++
++      kind2 = get_node_kind (e1->icu->idx, npus, ncus);
++      verify_edge (kind2, kind, phase);
+     }
++
++  /* Verify the number of incoming edges.  */
+   assert (ipu->incoming_count == count);
+-  for (e1 = ipu->outgoing, count = 0; e1; e1 = e1->next)
++
++  for (last_idx = 0, count = 0, e1 = ipu->outgoing;
++       e1;
++       last_idx = e1->icu->idx, count++, e1 = e1->next)
+     {
++      /* Verify that outgoing edges are in ascending idx order.  */
+       assert (count == 0 || e1->icu->idx > last_idx);
+-      last_idx = e1->icu->idx;
+-      count++;
++
++      /* Verify that each outgoing edge has a corresponding incoming edge.  */
+       for (e2 = e1->icu->incoming; e2; e2 = e2->next)
+ 	if (e2->icu == ipu)
+ 	  break;
+       assert (e2);
++
++      kind2 = get_node_kind (e1->icu->idx, npus, ncus);
++      verify_edge (kind, kind2, phase);
+     }
++
++  /* Verify the number of outgoing edges.  */
+   assert (ipu->outgoing_count == count);
++
+   *ic += ipu->incoming_count;
+   *oc += ipu->outgoing_count;
+ }
+@@ -6054,17 +6589,55 @@ verify_edges_1 (struct import_cu *ipu, unsigned int *ic, unsigned int *oc)
+ /* Helper function for debugging create_import_tree.  Call verify_edges_1
+    on all CUs and PUs.  */
+ void
+-verify_edges (struct import_cu **ipus, unsigned int npus, unsigned int ncus)
++verify_edges (struct import_cu **ipus, unsigned int npus, unsigned int ncus,
++	      unsigned int phase)
+ {
+   struct import_cu *ipu;
+-  unsigned int i, ic = 0, oc = 0;
+-  for (ipu = ipus[0]; ipu; ipu = ipu->next)
+-    verify_edges_1 (ipu, &ic, &oc);
++  unsigned int i, ic, oc;
++
++  ic = 0;
++  oc = 0;
++
++  /* Verify initial PUs.  */
++  ipu = NULL;
++  for (i = 0; i < npus; ++i)
++    {
++      ipu = ipus[i];
++      assert (ipu->cu != NULL);
++      if (i < npus - 1)
++	assert (ipu->next == ipus[i + 1]);
++      assert (ipu->incoming != NULL);
++      if (phase <= 2)
++	assert (ipu->outgoing == NULL);
++      verify_edges_1 (ipu, &ic, &oc, NODE_PU_INITIAL, npus, ncus, phase);
++    }
++
++  /* Verify new PUs.  */
++  assert (ipu != NULL);
++  for (ipu = ipu->next; ipu; ipu = ipu->next)
++    {
++      assert (phase != 1);
++      assert (ipu->cu == NULL);
++      assert (ipu->incoming != NULL);
++      assert (ipu->outgoing != NULL);
++      verify_edges_1 (ipu, &ic, &oc, NODE_PU_NEW, npus, ncus, phase);
++    }
++
++  /* Verify CUs.  */
+   for (i = 0; i < ncus; i++)
+-    verify_edges_1 (ipus[i + npus], &ic, &oc);
++    {
++      ipu = ipus[npus + i];
++      assert (ipu->cu != NULL);
++      assert (ipu->next == NULL);
++      assert (ipu->incoming == NULL);
++      assert (ipu->outgoing != NULL);
++      verify_edges_1 (ipu, &ic, &oc, NODE_CU, npus, ncus, phase);
++    }
++
++  /* Verify that the overall number of incoming and outgoing edges is
++     equal.  */
+   assert (ic == oc);
+ }
+-#endif
+ 
+ /* Function to optimize the size of DW_TAG_imported_unit DIEs by
+    creating an inclusion tree, instead of each CU importing all
+@@ -6244,12 +6817,43 @@ create_import_tree (void)
+   for (; puidx < npus + ncus; puidx++)
+     ipus[puidx]->idx = puidx;
+   last_pu = ipus[npus - 1];
++  if (unlikely (dump_edges_p))
++    dump_edges ("phase 1", ipus, npus, ncus);
++  if (unlikely (verify_edges_p))
++    verify_edges (ipus, npus, ncus, 1);
+   /* Now, for the above constructed bipartite graph, find K x,2 components
+      where x >= 5 (for DWARF3 and above or ptr_size 4, for DWARF2 and
+      ptr_size 8 it can be even x == 4) and add a new PU node, where all
+      CUs from the component will point to the new PU node and that new PU
+      will point to all the destination PUs.  In theory with DWARF2
+-     and ptr_size 1 we could need x >= 9.  */
++     and ptr_size 1 we could need x >= 9.
++
++     The example below demonstrates the type of transformation.  The
++     transformation is an optimization if the benefit of reducing the number
++     of imports (in other words, edges) is bigger than the cost of adding an
++     extra PU.  OTOH, the transformation can be done in the presence of
++     additional incoming edges for PU_3 and PU_4.
++
++     Before:                    After:
++
++     CU_1---------->PU_3        CU_1                PU_3
++         \          ^  ^            \               ^
++          \        /  /              \             /
++           \      /  /                \           /
++            x----o  /                  \         /
++           / \     /                    \       /
++          /   \   /                      \     /
++         /     \ /                        v   /
++     CU_2       x               CU_2----->PU_5
++         \     / \                        ^   \
++          \   /   \                      /     \
++           \ /     \                    /       \
++            x----o  \                  /         \
++           /      \  \                /           \
++          /        \  \              /             \
++         /          v  v            /               v
++     CU_3---------->PU_4        CU_3                PU_4
++  */
+   for (i = 0; i < npus - 1; i++)
+     {
+       struct import_cu *pudst[2], *pusrc[10];
+@@ -6402,11 +7006,59 @@ create_import_tree (void)
+ 	    }
+ 	}
+     }
++  if (unlikely (dump_edges_p))
++    dump_edges ("phase 2", ipus, npus, ncus);
++  if (unlikely (verify_edges_p))
++    verify_edges (ipus, npus, ncus, 2);
+   /* Try to merge PUs which have the same set of referrers if
+-     beneficial, or if one PU has a subset of referrers of the
+-     other, attempt to replace all the incoming edges from the
+-     referrers intersection to the PU with larger number of
+-     incoming edges by an edge from the other PU.  */
++     beneficial.
++
++     The example below demonstrates the type of transformation.  The
++     transformation is an optimization because it reduces the number of import
++     statements (in other words, edges) as well as the number of PUs.  It can
++     however not be done if PU_3 or PU_4 have additional incoming edges.
++
++     Before:               After:
++
++     CU_1----->PU_3        CU_1
++         \     ^               \
++          \   /                 \
++           \ /                   v
++            x                    PU_3_4
++           / \                   ^
++          /   \                 /
++         /     v               /
++     CU_2----->PU_4        CU_2
++
++     Or, if one PU has a subset of referrers of the other, attempt to replace
++     all the incoming edges from the referrers intersection to the PU with
++     larger number of incoming edges by an edge from the other PU.
++
++     The example below demonstrates the type of transformation.  The
++     transformation is an optimization because it reduces the number of import
++     statements (in other words, edges).  It can however not be done if PU_3
++     has additional incoming edges.
++
++     Before:               After:
++
++     CU_1----->PU_3        CU_1------>PU_3
++         \     ^                      ^  |
++          \   /                      /   |
++           \ /                      /    |
++            x                      /     |
++           / \                    /      |
++          /   \                  /       |
++         /     \                /        |
++     CU_2       \           CU_2         o
++         \       \                       |
++          \       o                      |
++           \      |                      |
++            \     |                      |
++             \    |                      |
++              \   |                      |
++               v  v                      v
++     CU_3----->PU_4        CU_3------>PU_4
++  */
+   for (ipu = ipus[0]; ipu; ipu = ipu->next)
+     {
+       struct import_edge *e1, *e2, *e3, *e4, **e1p, **ep;
+@@ -6615,7 +7267,7 @@ create_import_tree (void)
+ 		  assert (*ep == NULL || (*ep)->icu != ipusub);
+ 		  e4 = edge_freelist;
+ 		  edge_freelist = edge_freelist->next;
+-		  e4->icu = ipusup;
++		  e4->icu = ipusub;
+ 		  e4->next = *ep;
+ 		  *ep = e4;
+ 		  ipusup->incoming_count -= ipusub->incoming_count - 1;
+@@ -6628,6 +7280,10 @@ create_import_tree (void)
+       for (icu = ipu->next; icu; icu = icu->next)
+ 	icu->seen = false;
+     }
++  if (unlikely (dump_edges_p))
++    dump_edges ("phase 3", ipus, npus, ncus);
++  if (unlikely (verify_edges_p))
++    verify_edges (ipus, npus, ncus, 3);
+   /* Create DW_TAG_partial_unit (and containing dw_cu structures).  */
+   if (fi_multifile)
+     {
+@@ -8403,6 +9059,7 @@ compute_abbrevs (DSO *dso)
+ 	  intracusize = i;
+ 	}
+       while (1);
++      cu->initial_intracusize = intracusize;
+       off = init_new_die_offsets (cu->cu_die, headersz, intracusize);
+       do
+ 	{
+@@ -9007,7 +9664,7 @@ adjust_exprloc (dw_cu_ref cu, dw_die_ref die, dw_cu_ref refcu,
+    memory starting at PTR, return pointer after the DIE.  */
+ static unsigned char *
+ write_die (unsigned char *ptr, dw_cu_ref cu, dw_die_ref die,
+-	   dw_cu_ref refcu, dw_die_ref ref)
++	   dw_cu_ref refcu, dw_die_ref ref, unsigned int *die_count)
+ {
+   uint64_t low_pc = 0;
+   dw_die_ref child, sib = NULL, origin = NULL;
+@@ -9015,6 +9672,8 @@ write_die (unsigned char *ptr, dw_cu_ref cu, dw_die_ref die,
+ 
+   if (wr_multifile ? die->die_no_multifile : die->die_remove)
+     return ptr;
++  if (die_count)
++    (*die_count)++;
+   if (die->die_offset == -1U)
+     {
+       if (ref != NULL)
+@@ -9118,6 +9777,9 @@ write_die (unsigned char *ptr, dw_cu_ref cu, dw_die_ref die,
+ 					  ? ptr_size : 4);
+ 		inptr += refcu->cu_version == 2 ? ptr_size : 4;
+ 		refd = off_htab_lookup (NULL, value);
++		if (refd == NULL || refd->die_tag == 0)
++		  error (1, 0, "Couldn't find DIE at DW_FORM_ref_addr offset"
++			 " 0x%" PRIx64, value);
+ 		assert (refd != NULL);
+ 		refdt = refd;
+ 		while (refdt->die_toplevel == 0)
+@@ -9507,11 +10169,11 @@ write_die (unsigned char *ptr, dw_cu_ref cu, dw_die_ref die,
+       dw_die_ref ref_child;
+       for (child = die->die_child, ref_child = ref->die_child;
+ 	   child; child = child->die_sib, ref_child = ref_child->die_sib)
+-	ptr = write_die (ptr, cu, child, refcu, ref_child);
++	ptr = write_die (ptr, cu, child, refcu, ref_child, die_count);
+     }
+   else
+     for (child = die->die_child; child; child = child->die_sib)
+-      ptr = write_die (ptr, cu, child, NULL, NULL);
++      ptr = write_die (ptr, cu, child, NULL, NULL, die_count);
+   if (die->die_child)
+     write_8 (ptr, 0);
+   return ptr;
+@@ -9553,14 +10215,7 @@ recompute_abbrevs (dw_cu_ref cu, unsigned int cu_size)
+     }
+   else
+     {
+-      /* Need to be conservatively high estimate, as update_new_die_offsets
+-	 relies on the offsets always decreasing.  cu_size at this point is
+-	 the size we will end up with in the end, but if cu_size is
+-	 sufficiently close (from bottom) to some uleb128 boundary (say
+-	 16384), init_new_die_offsets might return off above that boundary
+-	 and then update_new_die_offsets might fail its assertions on
+-	 reference to DIEs that crossed the uleb128 boundary.  */
+-      intracusize = size_of_uleb128 (2 * cu_size);
++      intracusize = cu->initial_intracusize;
+ 
+       off = init_new_die_offsets (cu->cu_die, headersz, intracusize);
+       do
+@@ -9587,7 +10242,7 @@ recompute_abbrevs (dw_cu_ref cu, unsigned int cu_size)
+ /* Construct new .debug_info section in malloced memory,
+    store it to debug_sections[DEBUG_INFO].new_data.  */
+ static void
+-write_info (void)
++write_info (unsigned int *die_count)
+ {
+   dw_cu_ref cu, cu_next;
+   unsigned char *info = malloc (debug_sections[DEBUG_INFO].new_size);
+@@ -9595,6 +10250,8 @@ write_info (void)
+ 
+   if (info == NULL)
+     dwz_oom ();
++  if (die_count)
++    *die_count = 0;
+   debug_sections[DEBUG_INFO].new_data = info;
+   cu = first_cu;
+   if (unlikely (fi_multifile))
+@@ -9629,7 +10286,7 @@ write_info (void)
+       write_16 (ptr, cu->cu_version);
+       write_32 (ptr, cu->u2.cu_new_abbrev_offset);
+       write_8 (ptr, ptr_size);
+-      ptr = write_die (ptr, cu, cu->cu_die, NULL, NULL);
++      ptr = write_die (ptr, cu, cu->cu_die, NULL, NULL, die_count);
+       assert (info + (next_off - (wr_multifile ? multi_info_off : 0)) == ptr);
+       if (unlikely (low_mem) && cu->cu_kind != CU_PU)
+ 	collapse_children (cu, cu->cu_die);
+@@ -9735,7 +10392,7 @@ write_types (void)
+       ref = off_htab_lookup (cu, cu->cu_offset + read_32 (inptr));
+       assert (ref && ref->die_dup == NULL);
+       write_32 (ptr, ref->u.p2.die_new_offset);
+-      ptr = write_die (ptr, cu, cu->cu_die, NULL, NULL);
++      ptr = write_die (ptr, cu, cu->cu_die, NULL, NULL, NULL);
+       assert (types + next_off == ptr);
+       if (unlikely (low_mem))
+ 	collapse_children (cu, cu->cu_die);
+@@ -10200,7 +10857,7 @@ init_endian (int endianity)
+ 
+ /* Read DWARF sections from DSO.  */
+ static int
+-read_dwarf (DSO *dso, bool quieter)
++read_dwarf (DSO *dso, bool quieter, unsigned int *die_count)
+ {
+   Elf_Data *data;
+   Elf_Scn *scn;
+@@ -10288,7 +10945,7 @@ read_dwarf (DSO *dso, bool quieter)
+       return 1;
+     }
+ 
+-  return read_debug_info (dso, DEBUG_INFO);
++  return read_debug_info (dso, DEBUG_INFO, die_count);
+ }
+ 
+ /* Open an ELF file NAME.  */
+@@ -10368,7 +11025,7 @@ error_out:
+    when using qsort_r instead.  */
+ static DSO *compare_section_numbers_implicit_arg;
+ 
+-/* Helper functon for sort_section_numbers.  */
++/* Helper function for sort_section_numbers.  */
+ static int
+ compare_section_numbers (const void *p1, const void *p2)
+ {
+@@ -10553,7 +11210,7 @@ calculate_section_distance (DSO *dso, unsigned int *sorted_section_numbers,
+ /* Store new ELF into FILE.  debug_sections array contains
+    new_data/new_size pairs where needed.  */
+ static int
+-write_dso (DSO *dso, const char *file, struct stat *st)
++write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
+ {
+   Elf *elf = NULL;
+   GElf_Ehdr ehdr;
+@@ -10935,6 +11592,25 @@ write_dso (DSO *dso, const char *file, struct stat *st)
+       /* | (ret & 1) to silence up __wur warning for fchown.  */
+       return 1 | (ret & 1);
+     }
++  if (save_to_temp)
++    {
++      const char *prefix = "dwz.";
++      size_t buf_len = strlen (prefix) + strlen (dso->filename) + 1;
++      char *buf = (char *)alloca (buf_len);
++      size_t offset = 0;
++      strcpy (&buf[offset], prefix);
++      offset += strlen (prefix);
++      strcpy (&buf[offset], dso->filename);
++      offset += strlen (dso->filename);
++      assert (offset == buf_len - 1);
++      assert (buf[offset] == '\0');
++      unlink (buf);
++      if (link (dso->filename, buf) != 0)
++	{
++	  error (0, errno, "Failed to link file: %s\n", dso->filename);
++	  return 1;
++	}
++    }
+   return 0;
+ }
+ 
+@@ -10952,7 +11628,11 @@ cleanup (void)
+       cu->cu_new_abbrev = NULL;
+     }
+   if (off_htab != NULL)
+-    htab_delete (off_htab);
++    {
++      if (tracing)
++	htab_report (off_htab, "off_htab final");
++      htab_delete (off_htab);
++    }
+   off_htab = NULL;
+   if (types_off_htab != NULL)
+     htab_delete (types_off_htab);
+@@ -11005,6 +11685,149 @@ cleanup (void)
+   max_line_id = 0;
+ }
+ 
++/* Propagate the die_no_multifile property along the duplicate chain of which
++   DIE is a member.  If the property was changed on any die, set *CHANGED to
++   true.  */
++static void
++propagate_multifile_duplicate_chain (dw_die_ref die, bool *changed)
++{
++  dw_die_ref dup = first_dup (die);
++  if (!dup)
++    return;
++
++  while (dup && dup->die_offset == -1U)
++    dup = dup->die_nextdup;
++  if (dup != die)
++    return;
++
++  bool any_no_multifile = false;
++  bool any_multifile = false;
++  bool prop_needed = false;
++  dw_die_ref d;
++  for (d = dup; d && !prop_needed; d = d->die_nextdup)
++    {
++      if (d->die_no_multifile)
++	any_no_multifile = true;
++      else
++	any_multifile = true;
++      prop_needed = any_no_multifile && any_multifile;
++    }
++  if (!prop_needed)
++    return;
++
++  *changed = true;
++
++  for (d = dup; d; d = d->die_nextdup)
++    d->die_no_multifile = 1;
++}
++
++/* Propagate the die_no_multifile property backwards along the outgoing
++   references of DIE, which is a member of CU and of the subtree of lower
++   toplevel die TOP_DIE.  If the property was changed on any die, set *CHANGED
++   to true.  */
++static void
++propagate_multifile_refs_backward (dw_cu_ref cu, dw_die_ref top_die,
++				   dw_die_ref die, bool *changed)
++{
++  struct abbrev_tag *t = die->die_abbrev;
++  unsigned int i;
++  unsigned char *ptr;
++  dw_die_ref child;
++
++  if (die->die_offset == -1U)
++    return;
++
++  ptr = debug_sections[DEBUG_INFO].data + die->die_offset;
++  read_uleb128 (ptr);
++  for (i = 0; i < t->nattr; ++i)
++    {
++      uint32_t form = t->attr[i].form;
++      uint64_t value;
++      dw_die_ref ref, reft;
++
++      while (form == DW_FORM_indirect)
++	form = read_uleb128 (ptr);
++
++      switch (form)
++	{
++	case DW_FORM_ref_addr:
++	  value = read_size (ptr, cu->cu_version == 2 ? ptr_size : 4);
++	  ptr += cu->cu_version == 2 ? ptr_size : 4;
++	  ref = off_htab_lookup (cu, value);
++	  goto finish_ref;
++	  break;
++	case DW_FORM_ref_udata:
++	case DW_FORM_ref1:
++	case DW_FORM_ref2:
++	case DW_FORM_ref4:
++	case DW_FORM_ref8:
++	  switch (form)
++	    {
++	    case DW_FORM_ref_udata: value = read_uleb128 (ptr); break;
++	    case DW_FORM_ref1: value = read_8 (ptr); break;
++	    case DW_FORM_ref2: value = read_16 (ptr); break;
++	    case DW_FORM_ref4: value = read_32 (ptr); break;
++	    case DW_FORM_ref8: value = read_64 (ptr); break;
++	    default: abort ();
++	    }
++	  if (t->attr[i].attr == DW_AT_sibling)
++	    break;
++	  ref = off_htab_lookup (cu, cu->cu_offset + value);
++	finish_ref:
++	  reft = ref;
++	  while (!reft->die_root
++		 && reft->die_parent->die_tag != DW_TAG_compile_unit
++		 && reft->die_parent->die_tag != DW_TAG_partial_unit
++		 && !reft->die_parent->die_named_namespace)
++	    reft = reft->die_parent;
++	  if (reft->die_root)
++	    ;
++	  else if (reft->die_ck_state == CK_KNOWN
++		   && !top_die->die_no_multifile && reft->die_no_multifile)
++	    {
++	      top_die->die_no_multifile = 1;
++	      *changed = true;
++	    }
++	  break;
++	default:
++	  ptr = skip_attr_no_dw_form_indirect (cu->cu_version, form, ptr);
++	}
++    }
++
++  for (child = die->die_child; child; child = child->die_sib)
++    propagate_multifile_refs_backward (cu, top_die, child, changed);
++}
++
++/* Do propagation of the die_no_multifile property that was not covered in
++   checksum_die and checksum_ref_die.  */
++static void
++propagate_multifile (void)
++{
++  bool changed;
++  dw_cu_ref cu;
++  dw_die_ref die;
++
++  changed = false;
++
++  FOREACH_CU_NORMAL_LOW_TOPLEVEL_DIE (cu, die)
++    propagate_multifile_duplicate_chain (die, &changed);
++
++  if (!changed)
++    return;
++
++  do
++    {
++      changed = false;
++
++      FOREACH_CU_NORMAL_LOW_TOPLEVEL_DIE (cu, die)
++	propagate_multifile_refs_backward (cu, die, die, &changed);
++
++      FOREACH_CU_NORMAL_LOW_TOPLEVEL_DIE (cu, die)
++	propagate_multifile_duplicate_chain (die, &changed);
++    }
++  while (changed);
++}
++
+ /* Returns true if DIE contains any toplevel children that can be
+    potentially shared between different executables or shared libraries.  */
+ static bool
+@@ -11312,6 +12135,29 @@ write_multifile_line (void)
+   return ret;
+ }
+ 
++#if DEVEL
++/* In struct dw_die we have a union u with fields p1 and p2.  The p1 field is
++   used during phase 1, after which the space is reused for the p2 field
++   during phase 2.  Clear the p2 field to get rid of values stored to p1
++   during phase 1.  */
++static int
++clear_p2_field (void)
++{
++  dw_cu_ref cu;
++  dw_die_ref die;
++
++  FOREACH_DIE (cu, die)
++    {
++      assert (die->die_collapsed_child == 0);
++      die->u.p2.die_new_abbrev = NULL;
++      die->u.p2.die_new_offset = 0;
++      die->u.p2.die_intracu_udata_size = 0;
++    }
++
++  return 0;
++}
++#endif
++
+ /* Collect potentially shareable DIEs, strings and .debug_macro
+    opcode sequences into temporary .debug_* files.  */
+ static int
+@@ -11338,6 +12184,10 @@ write_multifile (DSO *dso)
+   multi_ptr_size = ptr_size;
+   multi_endian = do_read_32 == buf_read_ule32 ? ELFDATA2LSB : ELFDATA2MSB;
+ 
++#if DEVEL
++  clear_p2_field ();
++#endif
++
+   for (i = 0; i < SAVED_SECTIONS; i++)
+     {
+       saved_new_data[i] = debug_sections[i].new_data;
+@@ -11345,6 +12195,7 @@ write_multifile (DSO *dso)
+       debug_sections[i].new_data = NULL;
+       debug_sections[i].new_size = debug_sections[i].size;
+     }
++  propagate_multifile ();
+   for (cu = first_cu; cu && cu->cu_kind != CU_TYPES; cu = cu->cu_next)
+     {
+       cu->u1.cu_new_abbrev_owner = NULL;
+@@ -11391,7 +12242,7 @@ write_multifile (DSO *dso)
+ 	{
+ 	  const char *mfile;
+ 	  write_abbrev ();
+-	  write_info ();
++	  write_info (NULL);
+ 	  /* Any error in this is fatal for multifile handling of further
+ 	     files.  */
+ 	  mfile = multifile;
+@@ -11520,6 +12371,7 @@ struct file_result
+   dev_t dev;
+   ino_t ino;
+   nlink_t nlink;
++  unsigned int die_count;
+ };
+ 
+ /* Handle compression of a single file FILE.  If OUTFILE is
+@@ -11640,7 +12492,8 @@ dwz (const char *file, const char *outfile, struct file_result *res,
+       obstack_init (&ob);
+       obstack_init (&ob2);
+ 
+-      ret = read_dwarf (dso, quiet && outfile == NULL);
++      unsigned int *die_count = multifile ? &res->die_count : NULL;
++      ret = read_dwarf (dso, quiet && outfile == NULL, die_count);
+       if (ret)
+ 	cleanup ();
+       else if (partition_dups ()
+@@ -11648,7 +12501,10 @@ dwz (const char *file, const char *outfile, struct file_result *res,
+ 	       || (unlikely (fi_multifile)
+ 		   && (remove_empty_pus ()
+ 		       || read_macro (dso)))
+-	       || read_debug_info (dso, DEBUG_TYPES)
++	       || read_debug_info (dso, DEBUG_TYPES, NULL)
++#if DEVEL
++	       || clear_p2_field ()
++#endif
+ 	       || compute_abbrevs (dso)
+ 	       || (unlikely (fi_multifile) && (finalize_strp (false), 0)))
+ 	{
+@@ -11772,7 +12628,7 @@ dwz (const char *file, const char *outfile, struct file_result *res,
+ 	      write_macro ();
+ 	    }
+ 	  write_abbrev ();
+-	  write_info ();
++	  write_info (die_count);
+ 	  write_loc ();
+ 	  write_types ();
+ 	  write_gdb_index ();
+@@ -11790,9 +12646,10 @@ dwz (const char *file, const char *outfile, struct file_result *res,
+ 	  if (multifile && !fi_multifile && !low_mem)
+ 	    write_multifile (dso);
+ 
++	  bool save_to_temp = save_temps && multifile && multifile_mode == 0;
+ 	  cleanup ();
+ 
+-	  if (write_dso (dso, outfile, &st))
++	  if (write_dso (dso, outfile, &st, save_to_temp))
+ 	    ret = 1;
+ 	}
+     }
+@@ -11827,14 +12684,14 @@ dwz (const char *file, const char *outfile, struct file_result *res,
+ 
+ /* In order to free all malloced memory at the end of optimize_multifile,
+    communicate .debug_str tail optimized offset list from optimize_multifile
+-   to read_multifile using an mmaped chunk of memory pointed by this
++   to read_multifile using an mmapped chunk of memory pointed by this
+    variable.  */
+ static unsigned int *strp_tail_off_list;
+ 
+ /* Process temporary .debug_* files, see what can be beneficially shared
+    and write a new ET_REL file, containing the shared .debug_* sections.  */
+ static int
+-optimize_multifile (void)
++optimize_multifile (unsigned int *die_count)
+ {
+   DSO dsobuf, *dso;
+   int fd = -1;
+@@ -11938,8 +12795,7 @@ optimize_multifile (void)
+   multifile_mode = MULTIFILE_MODE_OP;
+ 
+   obstack_alloc_failed_handler = dwz_oom;
+-#ifdef DEBUG_OP_MULTIFILE
+-  if (1)
++  if (unoptimized_multifile)
+     {
+       for (i = 0; i < SAVED_SECTIONS; i++)
+ 	{
+@@ -11947,9 +12803,7 @@ optimize_multifile (void)
+ 	  debug_sections[i].new_size = debug_sections[i].size;
+ 	}
+     }
+-  else
+-#endif
+-  if (setjmp (oom_buf))
++  else if (setjmp (oom_buf))
+     {
+       error (0, ENOMEM, "%s: Could not allocate memory", dso->filename);
+       goto fail;
+@@ -11963,10 +12817,14 @@ optimize_multifile (void)
+       obstack_init (&ob);
+       obstack_init (&ob2);
+ 
+-      if (read_debug_info (dso, DEBUG_INFO)
++      if (read_debug_info (dso, DEBUG_INFO, NULL)
+ 	  || partition_dups ())
+ 	goto fail;
+ 
++#if DEVEL
++      clear_p2_field ();
++#endif
++
+       for (cup = &first_cu; *cup && (*cup)->cu_kind == CU_PU;
+ 	   cup = &(*cup)->cu_next)
+ 	;
+@@ -12014,7 +12872,7 @@ optimize_multifile (void)
+ 	  strp_tail_off_list = finalize_strp (true);
+ 
+ 	  write_abbrev ();
+-	  write_info ();
++	  write_info (die_count);
+ 	  write_gdb_index ();
+ 	  if (write_multifile_line ())
+ 	    goto fail;
+@@ -12204,9 +13062,8 @@ optimize_multifile (void)
+     {
+       debug_sections[i].data = NULL;
+       debug_sections[i].size = 0;
+-#ifndef DEBUG_OP_MULTIFILE
+-      free (debug_sections[i].new_data);
+-#endif
++      if (!unoptimized_multifile)
++	free (debug_sections[i].new_data);
+       debug_sections[i].new_data = NULL;
+       debug_sections[i].new_size = 0;
+       debug_sections[i].sec = 0;
+@@ -12219,7 +13076,7 @@ optimize_multifile (void)
+    by optimize_multifile into data structures for fi_multifile
+    phase.  */
+ static DSO *
+-read_multifile (int fd)
++read_multifile (int fd, unsigned int die_count)
+ {
+   DSO *dso, *volatile ret;
+   unsigned int i;
+@@ -12252,7 +13109,7 @@ read_multifile (int fd)
+       obstack_init (&ob);
+       obstack_init (&ob2);
+ 
+-      if (read_dwarf (dso, false))
++      if (read_dwarf (dso, false, &die_count))
+ 	goto fail;
+ 
+       if (debug_sections[DEBUG_STR].size)
+@@ -12358,6 +13215,66 @@ alt_clear_dups (dw_die_ref die)
+     }
+ }
+ 
++/* Create a temporary file using NAME.  Return the corresponding file
++   descriptor if successful, otherwise return -1.  */
++static int
++make_temp_file (const char *name)
++{
++  const char *tmpdir = "/tmp/";
++  const char *template_suffix = ".XXXXXX";
++  int fd;
++  size_t buf_len, offset, name_len;
++  char *buf;
++
++  if (save_temps)
++    {
++      FILE *f = fopen (name, "w+");
++      if (f == NULL)
++	fd = -1;
++      else
++	fd = fileno (f);
++      return fd;
++    }
++
++  name_len = strlen (name);
++  buf_len = (strlen (tmpdir)
++	     + name_len
++	     + strlen (template_suffix)
++	     + 1);
++  if (buf_len < name_len)
++    return -1;
++  buf = (char *)malloc (buf_len);
++  if (buf == NULL)
++    return -1;
++  offset = 0;
++
++  strcpy (&buf[offset], tmpdir);
++  offset += strlen (tmpdir);
++
++  strcpy (&buf[offset], name);
++  offset += name_len;
++
++  strcpy (&buf[offset], template_suffix);
++  offset += strlen (template_suffix);
++
++  assert (offset == buf_len - 1);
++  assert (buf[offset] == '\0');
++
++  fd = mkstemp (buf);
++  if (fd == -1)
++    goto done;
++
++  /* Unlink the filename, such that the file is disposed of once the file
++     descriptor is closed.  */
++  unlink (buf);
++
++ done:
++  free (buf);
++  return fd;
++}
++
++int die_count_method_parsed;
++
+ /* Options for getopt_long.  */
+ static struct option dwz_options[] =
+ {
+@@ -12375,6 +13292,17 @@ static struct option dwz_options[] =
+   { "devel-trace",	 no_argument,	    &tracing, 1 },
+   { "devel-ignore-size", no_argument,	    &ignore_size, 1 },
+   { "devel-ignore-locus",no_argument,	    &ignore_locus, 1 },
++  { "devel-save-temps",  no_argument,	    &save_temps, 1 },
++  { "devel-dump-dies",  no_argument,	    &dump_dies_p, 1 },
++  { "devel-dump-dups",  no_argument,	    &dump_dups, 1 },
++  { "devel-unoptimized-multifile",
++			 no_argument,	    &unoptimized_multifile, 1 },
++  { "devel-verify-edges",no_argument,	    &verify_edges_p, 1 },
++  { "devel-dump-edges",  no_argument,	    &dump_edges_p, 1 },
++  { "devel-partition-dups-opt",
++			 no_argument,	    &partition_dups_opt, 1 },
++  { "devel-die-count-method",
++			 required_argument, &die_count_method_parsed, 1 },
+ #endif
+   { NULL,		 no_argument,	    0, 0 }
+ };
+@@ -12383,10 +13311,26 @@ static struct option dwz_options[] =
+ static void
+ usage (void)
+ {
++#define COMMON_OPTS "[-v] [-q] [-l <COUNT|none>] [-L <COUNT|none>]"
+   error (1, 0,
+ 	 "Usage:\n"
+-	 "  dwz [-v] [-q] [-h] [-l COUNT] [-L COUNT] [-m COMMONFILE] [-M NAME] [-r] [FILES]\n"
+-	 "  dwz [-v] [-q] [-l COUNT] [-L COUNT] -o OUTFILE FILE\n");
++	 "  dwz " COMMON_OPTS " [-h] [-m COMMONFILE] [-M NAME] [-r] [FILES]\n"
++	 "  dwz " COMMON_OPTS " -o OUTFILE FILE\n"
++#undef COMMON_OPTS
++#if DEVEL
++	 "Development options:\n"
++	 "  --devel-trace\n"
++	 "  --devel-ignore-size\n"
++	 "  --devel-ignore-locus\n"
++	 "  --devel-save-temps\n"
++	 "  --devel-dump-dies\n"
++	 "  --devel-unoptimized-multifile\n"
++	 "  --devel-verify-edges\n"
++	 "  --devel-dump-edges\n"
++	 "  --devel-partition-dups-opt\n"
++	 "  --devel-die-count-method"
++#endif
++	 );
+ }
+ 
+ /* Print version and exit.  */
+@@ -12395,8 +13339,9 @@ version (void)
+ {
+   fprintf (stderr,
+ 	   "dwz version " DWZ_VERSION "\n"
+-	   "Copyright (C) 2001-2012 Red Hat, Inc.\n"
+-	   "Copyright (C) 2003 Free Software Foundation, Inc.\n"
++	   "Copyright (C) " RH_YEARS " Red Hat, Inc.\n"
++	   "Copyright (C) " FSF_YEARS " Free Software Foundation, Inc.\n"
++	   "Copyright (C) " SUSE_YEARS " SUSE LLC.\n"
+ 	   "This program is free software; you may redistribute it under the terms of\n"
+ 	   "the GNU General Public License version 3 or (at your option) any later version.\n"
+ 	   "This program has absolutely no warranty.\n");
+@@ -12413,6 +13358,7 @@ main (int argc, char *argv[])
+   char *end;
+   struct file_result res;
+   bool hardlink = false;
++  const char *file;
+ 
+   if (elf_version (EV_CURRENT) == EV_NONE)
+     error (1, 0, "library out of date\n");
+@@ -12432,6 +13378,22 @@ main (int argc, char *argv[])
+ 
+ 	case 0:
+ 	  /* Option handled by getopt_long.  */
++	  if (die_count_method_parsed)
++	    {
++	      die_count_method_parsed = 0;
++	      if (strcmp (optarg, "none") == 0)
++		{
++		  die_count_method = none;
++		  break;
++		}
++	      if (strcmp (optarg, "estimate") == 0)
++		{
++		  die_count_method = estimate;
++		  break;
++		}
++	      error (1, 0, "invalid argument --devel-die-count-method %s",
++		     optarg);
++	    }
+ 	  break;
+ 
+ 	case 'o':
+@@ -12459,6 +13421,11 @@ main (int argc, char *argv[])
+ 	  break;
+ 
+ 	case 'l':
++	  if (strcmp (optarg, "none") == 0)
++	    {
++	      low_mem_die_limit = -1U;
++	      break;
++	    }
+ 	  l = strtoul (optarg, &end, 0);
+ 	  if (*end != '\0' || optarg == end || (unsigned int) l != l)
+ 	    error (1, 0, "invalid argument -l %s", optarg);
+@@ -12466,6 +13433,11 @@ main (int argc, char *argv[])
+ 	  break;
+ 
+ 	case 'L':
++	  if (strcmp (optarg, "none") == 0)
++	    {
++	      max_die_limit = -1U;
++	      break;
++	    }
+ 	  l = strtoul (optarg, &end, 0);
+ 	  if (*end != '\0' || optarg == end || (unsigned int) l != l)
+ 	    error (1, 0, "invalid argument -L %s", optarg);
+@@ -12478,59 +13450,55 @@ main (int argc, char *argv[])
+ 	}
+     }
+ 
++  /* Specifying a low-mem die-limit that is larger than or equal to the
++     max die-limit has the effect of disabling low-mem mode.  Make this
++     explicit by setting it to the 'none' value.  */
++  if (low_mem_die_limit != -1U
++      && low_mem_die_limit >= max_die_limit)
++    low_mem_die_limit = -1U;
++
+   if (multifile_relative && multifile_name)
+     error (1, 0, "-M and -r options can't be specified together");
+ 
+   if (optind == argc || optind + 1 == argc)
+     {
++      file = optind == argc ? "a.out" : argv[optind];
+       if (multifile != NULL)
+ 	{
+ 	  error (0, 0, "Too few files for multifile optimization");
+ 	  multifile = NULL;
+ 	}
+-      ret = dwz (optind == argc ? "a.out" : argv[optind], outfile,
+-		 &res, NULL, NULL);
++      res.die_count = 0;
++      ret = (low_mem_die_limit == 0
++	     ? 2
++	     : dwz (file, outfile, &res, NULL, NULL));
+       if (ret == 2)
+ 	{
+ 	  multifile_mode = MULTIFILE_MODE_LOW_MEM;
+-	  ret = dwz (optind == argc ? "a.out" : argv[optind], outfile,
+-		     &res, NULL, NULL);
++	  ret = dwz (file, outfile, &res, NULL, NULL);
+ 	}
+     }
+   else
+     {
++      int nr_files = argc - optind;
+       struct file_result *resa
+-	= (struct file_result *) malloc ((argc - optind) * sizeof (*resa));
++	= (struct file_result *) malloc ((nr_files) * sizeof (*resa));
+       bool hardlinks = false;
+       int successcount = 0;
+ 
++      for (i = 0; i < nr_files; ++i)
++	resa[i].die_count = 0;
+       if (resa == NULL)
+ 	error (1, ENOMEM, "failed to allocate result array");
+       if (outfile != NULL)
+ 	error (1, 0, "-o option not allowed for multiple files");
+       if (multifile)
+ 	{
+-	  char buf[sizeof "/tmp/dwz.debug_abbrev.XXXXXX"];
+-	  strcpy (buf, "/tmp/dwz.debug_info.XXXXXX");
+-	  multi_info_fd = mkstemp (buf);
+-	  if (multi_info_fd != -1)
+-	    unlink (buf);
+-	  strcpy (buf, "/tmp/dwz.debug_abbrev.XXXXXX");
+-	  multi_abbrev_fd = mkstemp (buf);
+-	  if (multi_abbrev_fd != -1)
+-	    unlink (buf);
+-	  strcpy (buf, "/tmp/dwz.debug_line.XXXXXX");
+-	  multi_line_fd = mkstemp (buf);
+-	  if (multi_line_fd != -1)
+-	    unlink (buf);
+-	  strcpy (buf, "/tmp/dwz.debug_str.XXXXXX");
+-	  multi_str_fd = mkstemp (buf);
+-	  if (multi_str_fd != -1)
+-	    unlink (buf);
+-	  strcpy (buf, "/tmp/dwz.debug_macro.XXXXXX");
+-	  multi_macro_fd = mkstemp (buf);
+-	  if (multi_macro_fd != -1)
+-	    unlink (buf);
++	  multi_info_fd = make_temp_file ("dwz.debug_info");
++	  multi_abbrev_fd = make_temp_file ("dwz.debug_abbrev");
++	  multi_line_fd = make_temp_file ("dwz.debug_line");
++	  multi_str_fd = make_temp_file ("dwz.debug_str");
++	  multi_macro_fd = make_temp_file ("dwz.debug_macro");
+ 	  if (multi_info_fd == -1
+ 	      || multi_abbrev_fd == -1
+ 	      || multi_line_fd == -1
+@@ -12543,12 +13511,16 @@ main (int argc, char *argv[])
+ 	}
+       for (i = optind; i < argc; i++)
+ 	{
+-	  int thisret = dwz (argv[i], NULL, &resa[i - optind],
+-			     hardlinks ? resa : NULL, &argv[optind]);
++	  int thisret;
++	  file = argv[i];
++	  thisret = (low_mem_die_limit == 0
++		     ? 2
++		     : dwz (file, NULL, &resa[i - optind],
++			    hardlinks ? resa : NULL, &argv[optind]));
+ 	  if (thisret == 2)
+ 	    {
+ 	      multifile_mode = MULTIFILE_MODE_LOW_MEM;
+-	      thisret = dwz (argv[i], NULL, &resa[i - optind],
++	      thisret = dwz (file, NULL, &resa[i - optind],
+ 			     hardlinks ? resa : NULL, &argv[optind]);
+ 	    }
+ 	  else if (resa[i - optind].res == 0)
+@@ -12574,11 +13546,12 @@ main (int argc, char *argv[])
+ 	}
+       if (multifile)
+ 	{
+-	  int multi_fd = optimize_multifile ();
++	  unsigned int multifile_die_count = 0;
++	  int multi_fd = optimize_multifile (&multifile_die_count);
+ 	  DSO *dso;
+ 	  if (multi_fd == -1)
+ 	    return 1;
+-	  dso = read_multifile (multi_fd);
++	  dso = read_multifile (multi_fd, multifile_die_count);
+ 	  if (dso == NULL)
+ 	    ret = 1;
+ 	  else
+@@ -12586,6 +13559,7 @@ main (int argc, char *argv[])
+ 	      for (i = optind; i < argc; i++)
+ 		{
+ 		  dw_cu_ref cu;
++		  file = argv[i];
+ 		  multifile_mode = MULTIFILE_MODE_FI;
+ 		  /* Don't process again files that couldn't
+ 		     be processed successfully.  */
+@@ -12594,7 +13568,7 @@ main (int argc, char *argv[])
+ 		    continue;
+ 		  for (cu = alt_first_cu; cu; cu = cu->cu_next)
+ 		    alt_clear_dups (cu->cu_die);
+-		  ret |= dwz (argv[i], NULL, &resa[i - optind],
++		  ret |= dwz (file, NULL, &resa[i - optind],
+ 			      hardlinks ? resa : NULL, &argv[optind]);
+ 		}
+ 	      elf_end (dso->elf);
+diff --git a/hashtab.c b/hashtab.c
+index 5d98451..41eab30 100644
+--- a/hashtab.c
++++ b/hashtab.c
+@@ -51,7 +51,6 @@ Boston, MA 02110-1301, USA.  */
+ 
+ #define DELETED_ENTRY  ((void *) 1)
+ 
+-static unsigned long higher_prime_number (unsigned long);
+ static hashval_t hash_pointer (const void *);
+ static int eq_pointer (const void *, const void *);
+ static int htab_expand (htab_t);
+@@ -66,7 +65,7 @@ htab_eq htab_eq_pointer = eq_pointer;
+ /* The following function returns a nearest prime number which is
+    greater than N, and near a power of two. */
+ 
+-static unsigned long
++unsigned long
+ higher_prime_number (n)
+      unsigned long n;
+ {
+diff --git a/hashtab.h b/hashtab.h
+index f1cc743..cb3da01 100644
+--- a/hashtab.h
++++ b/hashtab.h
+@@ -132,6 +132,9 @@ extern size_t	htab_size	(htab_t);
+ extern size_t	htab_elements	(htab_t);
+ extern double	htab_collisions	(htab_t);
+ 
++/* Utility function.  */
++unsigned long higher_prime_number (unsigned long);
++
+ /* A hash function for pointers.  */
+ extern htab_hash htab_hash_pointer;
+ 
+diff --git a/iterators.h b/iterators.h
+new file mode 100644
+index 0000000..8672ccf
+--- /dev/null
++++ b/iterators.h
+@@ -0,0 +1,126 @@
++/* Various iterators.
++
++   Copyright (C) 2019 SUSE LLC.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 2, or (at your option)
++   any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; see the file COPYING.  If not, write to
++   the Free Software Foundation, 51 Franklin Street - Fifth Floor,
++   Boston, MA 02110-1301, USA.  */
++
++
++/* CU iterators.  */
++
++#define FOREACH_CU(CU)				\
++  for (CU = first_cu; CU; CU = CU->cu_next)
++
++#define FOREACH_CU_PU(CU)						\
++  for (CU = first_cu; CU && CU->cu_kind == CU_PU; CU = CU->cu_next)
++
++#define FOREACH_CU_NORMAL(CU)						\
++  for (CU = first_cu; CU && CU->cu_kind != CU_TYPES; CU = CU->cu_next)	\
++    if (CU->cu_kind == CU_NORMAL)
++
++#define FOREACH_CU_TYPES(CU)			\
++  for (CU = first_cu; CU; CU = CU->cu_next)	\
++    if (CU->cu_kind == CU_TYPES)		\
++
++/* Function that describes a depth-first traversal path visiting all dies.  */
++
++static inline dw_die_ref FORCE_INLINE
++next_die (dw_die_ref die)
++{
++  if (die->die_child != NULL)
++    return die->die_child;
++
++  while (1)
++    {
++      if (die->die_sib != NULL)
++	return die->die_sib;
++
++      if (die->die_root)
++	return NULL;
++
++      die = die->die_parent;
++    }
++}
++
++/* Function that describes a depth-first traversal path visiting all toplevel
++   dies.  */
++
++static inline dw_die_ref FORCE_INLINE
++next_toplevel_die (dw_die_ref die)
++{
++  if (die->die_child != NULL && die->die_child->die_toplevel)
++    return die->die_child;
++
++  while (1)
++    {
++      if (die->die_sib != NULL && die->die_sib->die_toplevel)
++	return die->die_sib;
++
++      if (die->die_root)
++	return NULL;
++
++      die = die->die_parent;
++    }
++}
++
++/* DIE_IN_CU iterators.  */
++
++#define FOREACH_DIE_IN_CU(DIE, CU)			\
++  for (DIE = CU->cu_die; DIE; DIE = next_die (DIE))
++
++#define FOREACH_TOPLEVEL_DIE_IN_CU(DIE, CU)			\
++  for (DIE = CU->cu_die; DIE; DIE = next_toplevel_die (DIE))
++
++#define FOREACH_LOW_TOPLEVEL_DIE_IN_CU(DIE, CU)		\
++  FOREACH_TOPLEVEL_DIE_IN_CU (DIE, CU)			\
++    if (!(die->die_root || die->die_named_namespace))
++
++/* DIE iterators.  */
++
++#define FOREACH_DIE(CU, DIE)			\
++  FOREACH_CU (CU)				\
++    FOREACH_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_TOPLEVEL_DIE(CU, DIE)		\
++  FOREACH_CU (CU)				\
++    FOREACH_TOPLEVEL_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_LOW_TOPLEVEL_DIE(CU, DIE)	\
++  FOREACH_CU (CU)				\
++    FOREACH_LOW_TOPLEVEL_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_CU_PU_TOPLEVEL_DIE(CU, DIE)	\
++  FOREACH_CU_PU (CU)				\
++    FOREACH_TOPLEVEL_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_CU_NORMAL_TOPLEVEL_DIE(CU, DIE)	\
++  FOREACH_CU_NORMAL (CU)			\
++    FOREACH_TOPLEVEL_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_CU_TYPES_TOPLEVEL_DIE(CU, DIE)	\
++  FOREACH_CU_TYPES (CU)				\
++    FOREACH_TOPLEVEL_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_CU_PU_LOW_TOPLEVEL_DIE(CU, DIE)	\
++  FOREACH_CU_PU (CU)				\
++    FOREACH_LOW_TOPLEVEL_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_CU_NORMAL_LOW_TOPLEVEL_DIE(CU, DIE)	\
++  FOREACH_CU_NORMAL (CU)				\
++    FOREACH_LOW_TOPLEVEL_DIE_IN_CU (DIE, CU)
++
++#define FOREACH_CU_TYPES_LOW_TOPLEVEL_DIE(CU, DIE)	\
++  FOREACH_CU_TYPES (CU)					\
++    FOREACH_LOW_TOPLEVEL_DIE_IN_CU (DIE, CU)
+diff --git a/testsuite/dwz.tests/low-mem-die-limit-0.sh b/testsuite/dwz.tests/low-mem-die-limit-0.sh
+new file mode 100644
+index 0000000..7105431
+--- /dev/null
++++ b/testsuite/dwz.tests/low-mem-die-limit-0.sh
+@@ -0,0 +1,13 @@
++cp $execs/hello 1
++
++$execs/dwz-for-test \
++    -l0 \
++    --devel-trace \
++    1 \
++    2> dwz.err
++
++if grep -q "Compressing 1$" dwz.err; then
++    exit 1
++fi
++
++rm -f 1 dwz.err
+diff --git a/testsuite/dwz.tests/low-mem-die-limit-at-limit-multifile.sh b/testsuite/dwz.tests/low-mem-die-limit-at-limit-multifile.sh
+new file mode 100644
+index 0000000..ece4fd5
+--- /dev/null
++++ b/testsuite/dwz.tests/low-mem-die-limit-at-limit-multifile.sh
+@@ -0,0 +1,23 @@
++cp $execs/hello 1
++cp 1 2
++
++count=$(readelf -wi 1 \
++	    | grep '(DW_TAG' \
++	    | wc -l)
++limit=$count
++
++if $execs/dwz-for-test \
++       -l$limit \
++       --devel-trace \
++       -m 3 1 2 \
++       2> dwz.err; status=$?; then
++    true
++fi
++
++if grep -q "Hit low-mem die-limit" dwz.err; then
++    exit 1
++fi
++
++[ $status -eq 0 ]
++
++rm -f 1 2 3 dwz.err
+diff --git a/testsuite/dwz.tests/low-mem-die-limit-at-limit.sh b/testsuite/dwz.tests/low-mem-die-limit-at-limit.sh
+new file mode 100644
+index 0000000..03ff273
+--- /dev/null
++++ b/testsuite/dwz.tests/low-mem-die-limit-at-limit.sh
+@@ -0,0 +1,18 @@
++cp $execs/hello 1
++
++count=$(readelf -wi 1 \
++	    | grep '(DW_TAG' \
++	    | wc -l)
++limit=$count
++
++$execs/dwz-for-test \
++    -l$limit \
++    --devel-trace \
++    1 \
++    2> dwz.err
++
++if grep -q "Compressing 1 in low-mem mode" dwz.err; then
++    exit 1
++fi
++
++rm -f 1 dwz.err
+diff --git a/testsuite/dwz.tests/low-mem-die-limit-none.sh b/testsuite/dwz.tests/low-mem-die-limit-none.sh
+new file mode 100644
+index 0000000..20b8cad
+--- /dev/null
++++ b/testsuite/dwz.tests/low-mem-die-limit-none.sh
+@@ -0,0 +1,13 @@
++cp $execs/hello 1
++
++$execs/dwz-for-test \
++    -lnone \
++    --devel-trace \
++    1 \
++    2> dwz.err
++
++if grep -q "Compressing 1 in low-mem mode" dwz.err; then
++    exit 1
++fi
++
++rm -f 1 dwz.err
+diff --git a/testsuite/dwz.tests/low-mem-die-limit-one-above.sh b/testsuite/dwz.tests/low-mem-die-limit-one-above.sh
+new file mode 100644
+index 0000000..9b9a6ff
+--- /dev/null
++++ b/testsuite/dwz.tests/low-mem-die-limit-one-above.sh
+@@ -0,0 +1,18 @@
++cp $execs/hello 1
++
++count=$(readelf -wi 1 \
++	    | grep '(DW_TAG' \
++	    | wc -l)
++limit=$((count + 1))
++
++$execs/dwz-for-test \
++    -l$limit \
++    --devel-trace \
++    1 \
++    2> dwz.err
++
++if grep -q "Compressing 1 in low-mem mode" dwz.err; then
++    exit 1
++fi
++
++rm -f 1 dwz.err
+diff --git a/testsuite/dwz.tests/low-mem-die-limit-one-below.sh b/testsuite/dwz.tests/low-mem-die-limit-one-below.sh
+new file mode 100644
+index 0000000..4136336
+--- /dev/null
++++ b/testsuite/dwz.tests/low-mem-die-limit-one-below.sh
+@@ -0,0 +1,18 @@
++cp $execs/hello 1
++
++count=$(readelf -wi 1 \
++	    | grep '(DW_TAG' \
++	    | wc -l)
++limit=$((count - 1))
++
++$execs/dwz-for-test \
++    -l$limit \
++    --devel-trace \
++    1 \
++    2> dwz.err
++
++if ! grep -q "Compressing 1 in low-mem mode" dwz.err; then
++    exit 1
++fi
++
++rm -f 1 dwz.err
+diff --git a/testsuite/dwz.tests/max-die-limit-none.sh b/testsuite/dwz.tests/max-die-limit-none.sh
+new file mode 100644
+index 0000000..f45d566
+--- /dev/null
++++ b/testsuite/dwz.tests/max-die-limit-none.sh
+@@ -0,0 +1,7 @@
++cp $execs/hello 1
++
++$execs/dwz-for-test \
++    -Lnone \
++    1
++
++rm -f 1
+diff --git a/testsuite/dwz.tests/pointer-size.c b/testsuite/dwz.tests/pointer-size.c
+new file mode 100644
+index 0000000..320633d
+--- /dev/null
++++ b/testsuite/dwz.tests/pointer-size.c
+@@ -0,0 +1,8 @@
++#include <stdio.h>
++
++int
++main (void)
++{
++  printf ("%llu\n", (unsigned long long)sizeof (void *));
++  return 0;
++}
+diff --git a/testsuite/dwz.tests/pr25109.sh b/testsuite/dwz.tests/pr25109.sh
+new file mode 100644
+index 0000000..6da1f22
+--- /dev/null
++++ b/testsuite/dwz.tests/pr25109.sh
+@@ -0,0 +1,6 @@
++cp $execs/no-multifile-prop 1
++cp 1 2
++
++$execs/dwz-for-test -m 3 1 2 --devel-ignore-size
++
++rm -f 1 2 3
+diff --git a/testsuite/dwz.tests/save-temps.sh b/testsuite/dwz.tests/save-temps.sh
+new file mode 100644
+index 0000000..bcc1f1b
+--- /dev/null
++++ b/testsuite/dwz.tests/save-temps.sh
+@@ -0,0 +1,20 @@
++cp $execs/hello 1
++cp $execs/hello 2
++
++$execs/dwz-for-test --devel-save-temps -m 3 1 2
++
++files="
++  dwz.debug_abbrev
++  dwz.debug_info
++  dwz.debug_line
++  dwz.debug_macro
++  dwz.debug_str
++  dwz.1
++  dwz.2
++"
++
++for f in $files; do
++    [ -f $f ]
++done
++
++rm -f 1 2 3 $files
+diff --git a/testsuite/dwz.tests/two-files-low-mem-die-limit-0.sh b/testsuite/dwz.tests/two-files-low-mem-die-limit-0.sh
+new file mode 100644
+index 0000000..7f1e174
+--- /dev/null
++++ b/testsuite/dwz.tests/two-files-low-mem-die-limit-0.sh
+@@ -0,0 +1,14 @@
++cp $execs/hello 1
++cp 1 2
++
++$execs/dwz-for-test \
++    -l0 \
++    --devel-trace \
++    1 2 \
++    2> dwz.err
++
++if egrep -q "Compressing (1|2)$" dwz.err; then
++    exit 1
++fi
++
++rm -f 1 2 dwz.err
+diff --git a/testsuite/lib/dwarf-lib.exp b/testsuite/lib/dwarf-lib.exp
+new file mode 100644
+index 0000000..aca710e
+--- /dev/null
++++ b/testsuite/lib/dwarf-lib.exp
+@@ -0,0 +1,28 @@
++# Copyright 2019 Free Software Foundation, Inc.
++
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++# Auxiliary stuff to make the dwarf assembler in dwarf.exp work outside of the
++# gdb testsuite context.  We don't add this to dwarf.exp to keep differences
++# between dwz's dwarf.exp and gdb's dwarf.exp minimal.
++
++proc is_64_target {} {
++    if { $::env(POINTER_SIZE) == 8 } {
++	return 1
++    } elseif { $::env(POINTER_SIZE) == 4 } {
++	return 0
++    } else {
++	error "POINTER_SIZE not defined in env"
++    }
++}
+diff --git a/testsuite/lib/dwarf.exp b/testsuite/lib/dwarf.exp
+new file mode 100644
+index 0000000..d722982
+--- /dev/null
++++ b/testsuite/lib/dwarf.exp
+@@ -0,0 +1,1588 @@
++# Copyright 2010-2019 Free Software Foundation, Inc.
++
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++# This was copied from the git://sourceware.org/git/binutils-gdb.git
++# repository, file gdb/testsuite/lib/dwarf.exp
++
++# Return true if the target supports DWARF-2 and uses gas.
++# For now pick a sampling of likely targets.
++proc dwarf2_support {} {
++    if {[istarget *-*-linux*]
++	|| [istarget *-*-gnu*]
++	|| [istarget *-*-elf*]
++	|| [istarget *-*-openbsd*]
++	|| [istarget arm*-*-eabi*]
++	|| [istarget arm*-*-symbianelf*]
++	|| [istarget powerpc-*-eabi*]} {
++	return 1
++    }
++
++    return 0
++}
++
++# Build an executable from a fission-based .S file.
++# This handles the extra work of splitting the .o into non-dwo and dwo
++# pieces, making sure the .dwo is available if we're using cc-with-tweaks.sh
++# to build a .dwp file.
++# The arguments and results are the same as for build_executable.
++#
++# Current restrictions:
++# - only supports one source file
++# - cannot be run on remote hosts
++
++proc build_executable_from_fission_assembler { testname executable sources options } {
++    verbose -log "build_executable_from_fission_assembler $testname $executable $sources $options"
++    if { [llength $sources] != 1 } {
++	error "Only one source file supported."
++    }
++    if [is_remote host] {
++	error "Remote hosts are not supported."
++    }
++
++    global srcdir subdir
++    set source_file ${srcdir}/${subdir}/${sources}
++    set root_name [file rootname [file tail $source_file]]
++    set output_base [standard_output_file $root_name]
++    set object_file ${output_base}.o
++    set dwo_file ${output_base}.dwo
++    set object_options "object $options"
++    set objcopy [gdb_find_objcopy]
++
++    set result [gdb_compile $source_file $object_file object $options]
++    if { "$result" != "" } {
++	return -1
++    }
++
++    set command "$objcopy --extract-dwo $object_file $dwo_file"
++    verbose -log "Executing $command"
++    set result [catch "exec $command" output]
++    verbose -log "objcopy --extract-dwo output: $output"
++    if { $result == 1 } {
++	return -1
++    }
++
++    set command "$objcopy --strip-dwo $object_file"
++    verbose -log "Executing $command"
++    set result [catch "exec $command" output]
++    verbose -log "objcopy --strip-dwo output: $output"
++    if { $result == 1 } {
++	return -1
++    }
++
++    set result [gdb_compile $object_file $executable executable $options]
++    if { "$result" != "" } {
++	return -1
++    }
++
++    return 0
++}
++
++# Return a list of expressions about function FUNC's address and length.
++# The first expression is the address of function FUNC, and the second
++# one is FUNC's length.  SRC is the source file having function FUNC.
++# An internal label ${func}_label must be defined inside FUNC:
++#
++#  int main (void)
++#  {
++#    asm ("main_label: .globl main_label");
++#    return 0;
++#  }
++#
++# This label is needed to compute the start address of function FUNC.
++# If the compiler is gcc, we can do the following to get function start
++# and end address too:
++#
++# asm ("func_start: .globl func_start");
++# static void func (void) {}
++# asm ("func_end: .globl func_end");
++#
++# however, this isn't portable, because other compilers, such as clang,
++# may not guarantee the order of global asms and function.  The code
++# becomes:
++#
++# asm ("func_start: .globl func_start");
++# asm ("func_end: .globl func_end");
++# static void func (void) {}
++#
++
++proc function_range { func src } {
++    global decimal gdb_prompt
++
++    set exe [standard_temp_file func_addr[pid].x]
++
++    gdb_compile $src $exe executable {debug}
++
++    gdb_exit
++    gdb_start
++    gdb_load "$exe"
++
++    # Compute the label offset, and we can get the function start address
++    # by "${func}_label - $func_label_offset".
++    set func_label_offset ""
++    set test "p ${func}_label - ${func}"
++    gdb_test_multiple $test $test {
++	-re ".* = ($decimal)\r\n$gdb_prompt $" {
++	    set func_label_offset $expect_out(1,string)
++	}
++    }
++
++    # Compute the function length.
++    global hex
++    set func_length ""
++    set test "disassemble $func"
++    gdb_test_multiple $test $test {
++	-re ".*$hex <\\+($decimal)>:\[^\r\n\]+\r\nEnd of assembler dump\.\r\n$gdb_prompt $" {
++	    set func_length $expect_out(1,string)
++	}
++    }
++
++    # Compute the size of the last instruction.
++    if { $func_length == 0 } then {
++	set func_pattern "$func"
++    } else {
++	set func_pattern "$func\\+$func_length"
++    }
++    set test "x/2i $func+$func_length"
++    gdb_test_multiple $test $test {
++	-re ".*($hex) <$func_pattern>:\[^\r\n\]+\r\n\[ \]+($hex).*\.\r\n$gdb_prompt $" {
++	    set start $expect_out(1,string)
++	    set end $expect_out(2,string)
++
++	    set func_length [expr $func_length + $end - $start]
++	}
++    }
++
++    return [list "${func}_label - $func_label_offset" $func_length]
++}
++
++# A DWARF assembler.
++#
++# All the variables in this namespace are private to the
++# implementation.  Also, any procedure whose name starts with "_" is
++# private as well.  Do not use these.
++#
++# Exported functions are documented at their definition.
++#
++# In addition to the hand-written functions documented below, this
++# module automatically generates a function for each DWARF tag.  For
++# most tags, two forms are made: a full name, and one with the
++# "DW_TAG_" prefix stripped.  For example, you can use either
++# 'DW_TAG_compile_unit' or 'compile_unit' interchangeably.
++#
++# There are two exceptions to this rule: DW_TAG_variable and
++# DW_TAG_namespace.  For these, the full name must always be used,
++# as the short name conflicts with Tcl builtins.  (Should future
++# versions of Tcl or DWARF add more conflicts, this list will grow.
++# If you want to be safe you should always use the full names.)
++#
++# Each tag procedure is defined like:
++#
++# proc DW_TAG_mumble {{attrs {}} {children {}}} { ... }
++#
++# ATTRS is an optional list of attributes.
++# It is run through 'subst' in the caller's context before processing.
++#
++# Each attribute in the list has one of two forms:
++#   1. { NAME VALUE }
++#   2. { NAME VALUE FORM }
++#
++# In each case, NAME is the attribute's name.
++# This can either be the full name, like 'DW_AT_name', or a shortened
++# name, like 'name'.  These are fully equivalent.
++#
++# Besides DWARF standard attributes, assembler supports 'macro' attribute
++# which will be substituted by one or more standard or macro attributes.
++# supported macro attributes are:
++#
++#  - MACRO_AT_range { FUNC FILE }
++#  It is substituted by DW_AT_low_pc and DW_AT_high_pc with the start and
++#  end address of function FUNC in file FILE.
++#
++#  - MACRO_AT_func { FUNC FILE }
++#  It is substituted by DW_AT_name with FUNC and MACRO_AT_range.
++#
++# If FORM is given, it should name a DW_FORM_ constant.
++# This can either be the short form, like 'DW_FORM_addr', or a
++# shortened version, like 'addr'.  If the form is given, VALUE
++# is its value; see below.  In some cases, additional processing
++# is done; for example, DW_FORM_strp manages the .debug_str
++# section automatically.
++#
++# If FORM is 'SPECIAL_expr', then VALUE is treated as a location
++# expression.  The effective form is then DW_FORM_block, and VALUE
++# is passed to the (internal) '_location' proc to be translated.
++# This proc implements a miniature DW_OP_ assembler.
++#
++# If FORM is not given, it is guessed:
++# * If VALUE starts with the "@" character, the rest of VALUE is
++#   looked up as a DWARF constant, and DW_FORM_sdata is used.  For
++#   example, '@DW_LANG_c89' could be used.
++# * If VALUE starts with the ":" character, then it is a label
++#   reference.  The rest of VALUE is taken to be the name of a label,
++#   and DW_FORM_ref4 is used.  See 'new_label' and 'define_label'.
++# * If VALUE starts with the "%" character, then it is a label
++#   reference too, but DW_FORM_ref_addr is used.
++# * Otherwise, VALUE is taken to be a string and DW_FORM_string is
++#   used.  In order to prevent bugs where a numeric value is given but
++#   no form is specified, it is an error if the value looks like a number
++#   (using Tcl's "string is integer") and no form is provided.
++# More form-guessing functionality may be added.
++#
++# CHILDREN is just Tcl code that can be used to define child DIEs.  It
++# is evaluated in the caller's context.
++#
++# Currently this code is missing nice support for CFA handling, and
++# probably other things as well.
++
++namespace eval Dwarf {
++    # True if the module has been initialized.
++    variable _initialized 0
++
++    # Constants from dwarf2.h.
++    variable _constants
++    # DW_AT short names.
++    variable _AT
++    # DW_FORM short names.
++    variable _FORM
++    # DW_OP short names.
++    variable _OP
++
++    # The current output file.
++    variable _output_file
++
++    # Note: The _cu_ values here also apply to type units (TUs).
++    # Think of a TU as a special kind of CU.
++
++    # Current CU count.
++    variable _cu_count
++
++    # The current CU's base label.
++    variable _cu_label
++
++    # The current CU's version.
++    variable _cu_version
++
++    # The current CU's address size.
++    variable _cu_addr_size
++    # The current CU's offset size.
++    variable _cu_offset_size
++
++    # Label generation number.
++    variable _label_num
++
++    # The deferred output array.  The index is the section name; the
++    # contents hold the data for that section.
++    variable _deferred_output
++
++    # If empty, we should write directly to the output file.
++    # Otherwise, this is the name of a section to write to.
++    variable _defer
++
++    # The abbrev section.  Typically .debug_abbrev but can be .debug_abbrev.dwo
++    # for Fission.
++    variable _abbrev_section
++
++    # The next available abbrev number in the current CU's abbrev
++    # table.
++    variable _abbrev_num
++
++    # The string table for this assembly.  The key is the string; the
++    # value is the label for that string.
++    variable _strings
++
++    # Current .debug_line unit count.
++    variable _line_count
++
++    # Whether a file_name entry was seen.
++    variable _line_saw_file
++
++    # Whether a line table program has been seen.
++    variable _line_saw_program
++
++    # A Label for line table header generation.
++    variable _line_header_end_label
++
++    # The address size for debug ranges section.
++    variable _debug_ranges_64_bit
++
++    proc _process_one_constant {name value} {
++	variable _constants
++	variable _AT
++	variable _FORM
++	variable _OP
++
++	set _constants($name) $value
++
++	if {![regexp "^DW_(\[A-Z\]+)_(\[A-Za-z0-9_\]+)$" $name \
++		  ignore prefix name2]} {
++	    error "non-matching name: $name"
++	}
++
++	if {$name2 == "lo_user" || $name2 == "hi_user"} {
++	    return
++	}
++
++	# We only try to shorten some very common things.
++	# FIXME: CFA?
++	switch -exact -- $prefix {
++	    TAG {
++		# Create two procedures for the tag.  These call
++		# _handle_DW_TAG with the full tag name baked in; this
++		# does all the actual work.
++		proc $name {{attrs {}} {children {}}} \
++		    "_handle_DW_TAG $name \$attrs \$children"
++
++		# Filter out ones that are known to clash.
++		if {$name2 == "variable" || $name2 == "namespace"} {
++		    set name2 "tag_$name2"
++		}
++
++		if {[info commands $name2] != {}} {
++		    error "duplicate proc name: from $name"
++		}
++
++		proc $name2 {{attrs {}} {children {}}} \
++		    "_handle_DW_TAG $name \$attrs \$children"
++	    }
++
++	    AT {
++		set _AT($name2) $name
++	    }
++
++	    FORM {
++		set _FORM($name2) $name
++	    }
++
++	    OP {
++		set _OP($name2) $name
++	    }
++
++	    default {
++		return
++	    }
++	}
++    }
++
++    proc _read_constants {} {
++	global srcdir hex decimal
++	variable _constants
++
++	# DWARF name-matching regexp.
++	set dwrx "DW_\[a-zA-Z0-9_\]+"
++	# Whitespace regexp.
++	set ws "\[ \t\]+"
++
++	set fd [open [file join $srcdir .. dwarf2.h]]
++	while {![eof $fd]} {
++	    set line [gets $fd]
++	    if {[regexp -- "^${ws}($dwrx)${ws}=${ws}($hex|$decimal),?$" \
++		     $line ignore name value ignore2]} {
++		_process_one_constant $name $value
++	    }
++	}
++	close $fd
++
++	set fd [open [file join $srcdir .. dwarf2.def]]
++	while {![eof $fd]} {
++	    set line [gets $fd]
++	    if {[regexp -- \
++		     "^DW_\[A-Z_\]+${ws}\\(($dwrx),${ws}($hex|$decimal)\\)$" \
++		     $line ignore name value ignore2]} {
++		_process_one_constant $name $value
++	    }
++	}
++	close $fd
++
++	set _constants(SPECIAL_expr) $_constants(DW_FORM_block)
++    }
++
++    proc _quote {string} {
++	# FIXME
++	return "\"${string}\\0\""
++    }
++
++    proc _nz_quote {string} {
++	# For now, no quoting is done.
++	return "\"${string}\""
++    }
++
++    proc _handle_DW_FORM {form value} {
++	switch -exact -- $form {
++	    DW_FORM_string  {
++		_op .ascii [_quote $value]
++	    }
++
++	    DW_FORM_flag_present {
++		# We don't need to emit anything.
++	    }
++
++	    DW_FORM_data4 -
++	    DW_FORM_ref4 {
++		_op .4byte $value
++	    }
++
++	    DW_FORM_ref_addr {
++		variable _cu_offset_size
++		variable _cu_version
++		variable _cu_addr_size
++
++		if {$_cu_version == 2} {
++		    set size $_cu_addr_size
++		} else {
++		    set size $_cu_offset_size
++		}
++
++		_op .${size}byte $value
++	    }
++
++	    DW_FORM_sec_offset {
++		variable _cu_offset_size
++		_op .${_cu_offset_size}byte $value
++	    }
++
++	    DW_FORM_ref1 -
++	    DW_FORM_flag -
++	    DW_FORM_data1 {
++		_op .byte $value
++	    }
++
++	    DW_FORM_sdata {
++		_op .sleb128 $value
++	    }
++
++	    DW_FORM_ref_udata -
++	    DW_FORM_udata {
++		_op .uleb128 $value
++	    }
++
++	    DW_FORM_addr {
++		variable _cu_addr_size
++
++		_op .${_cu_addr_size}byte $value
++	    }
++
++	    DW_FORM_data2 -
++	    DW_FORM_ref2 {
++		_op .2byte $value
++	    }
++
++	    DW_FORM_data8 -
++	    DW_FORM_ref8 -
++	    DW_FORM_ref_sig8 {
++		_op .8byte $value
++	    }
++
++	    DW_FORM_data16 {
++		_op .8byte $value
++	    }
++
++	    DW_FORM_strp {
++		variable _strings
++		variable _cu_offset_size
++
++		if {![info exists _strings($value)]} {
++		    set _strings($value) [new_label strp]
++		    _defer_output .debug_string {
++			define_label $_strings($value)
++			_op .ascii [_quote $value]
++		    }
++		}
++
++		_op .${_cu_offset_size}byte $_strings($value) "strp: $value"
++	    }
++
++	    SPECIAL_expr {
++		set l1 [new_label "expr_start"]
++		set l2 [new_label "expr_end"]
++		_op .uleb128 "$l2 - $l1" "expression"
++		define_label $l1
++		_location $value
++		define_label $l2
++	    }
++
++	    DW_FORM_block1 {
++		set len [string length $value]
++		if {$len > 255} {
++		    error "DW_FORM_block1 length too long"
++		}
++		_op .byte $len
++		_op .ascii [_nz_quote $value]
++	    }
++
++	    DW_FORM_block2 -
++	    DW_FORM_block4 -
++
++	    DW_FORM_block -
++
++	    DW_FORM_ref2 -
++	    DW_FORM_indirect -
++	    DW_FORM_exprloc -
++
++	    DW_FORM_strx -
++	    DW_FORM_strx1 -
++	    DW_FORM_strx2 -
++	    DW_FORM_strx3 -
++	    DW_FORM_strx4 -
++
++	    DW_FORM_GNU_addr_index -
++	    DW_FORM_GNU_str_index -
++	    DW_FORM_GNU_ref_alt -
++	    DW_FORM_GNU_strp_alt -
++
++	    default {
++		error "unhandled form $form"
++	    }
++	}
++    }
++
++    proc _guess_form {value varname} {
++	upvar $varname new_value
++
++	switch -exact -- [string range $value 0 0] {
++	    @ {
++		# Constant reference.
++		variable _constants
++
++		set new_value $_constants([string range $value 1 end])
++		# Just the simplest.
++		return DW_FORM_sdata
++	    }
++
++	    : {
++		# Label reference.
++		variable _cu_label
++
++		set new_value "[string range $value 1 end] - $_cu_label"
++
++		return DW_FORM_ref4
++	    }
++
++	    % {
++		# Label reference, an offset from .debug_info.
++		set new_value "[string range $value 1 end]"
++
++		return DW_FORM_ref_addr
++	    }
++
++	    default {
++		return DW_FORM_string
++	    }
++	}
++    }
++
++    # Map NAME to its canonical form.
++    proc _map_name {name ary} {
++	variable $ary
++
++	if {[info exists ${ary}($name)]} {
++	    set name [set ${ary}($name)]
++	}
++
++	return $name
++    }
++
++    proc _handle_attribute { attr_name attr_value attr_form } {
++	variable _abbrev_section
++	variable _constants
++
++	_handle_DW_FORM $attr_form $attr_value
++
++	_defer_output $_abbrev_section {
++	    _op .uleb128 $_constants($attr_name) $attr_name
++	    _op .uleb128 $_constants($attr_form) $attr_form
++	}
++    }
++
++    # Handle macro attribute MACRO_AT_range.
++
++    proc _handle_macro_at_range { attr_value } {
++	if {[llength $attr_value] != 2} {
++	    error "usage: MACRO_AT_range { func file }"
++	}
++
++	set func [lindex $attr_value 0]
++	set src [lindex $attr_value 1]
++	set result [function_range $func $src]
++
++	_handle_attribute DW_AT_low_pc [lindex $result 0] \
++	    DW_FORM_addr
++	_handle_attribute DW_AT_high_pc \
++	    "[lindex $result 0] + [lindex $result 1]" DW_FORM_addr
++    }
++
++    # Handle macro attribute MACRO_AT_func.
++
++    proc _handle_macro_at_func { attr_value } {
++	if {[llength $attr_value] != 2} {
++	    error "usage: MACRO_AT_func { func file }"
++	}
++	_handle_attribute DW_AT_name [lindex $attr_value 0] DW_FORM_string
++	_handle_macro_at_range $attr_value
++    }
++
++    proc _handle_DW_TAG {tag_name {attrs {}} {children {}}} {
++	variable _abbrev_section
++	variable _abbrev_num
++	variable _constants
++
++	set has_children [expr {[string length $children] > 0}]
++	set my_abbrev [incr _abbrev_num]
++
++	# We somewhat wastefully emit a new abbrev entry for each tag.
++	# There's no reason for this other than laziness.
++	_defer_output $_abbrev_section {
++	    _op .uleb128 $my_abbrev "Abbrev start"
++	    _op .uleb128 $_constants($tag_name) $tag_name
++	    _op .byte $has_children "has_children"
++	}
++
++	_op .uleb128 $my_abbrev "Abbrev ($tag_name)"
++
++	foreach attr $attrs {
++	    set attr_name [_map_name [lindex $attr 0] _AT]
++
++	    # When the length of ATTR is greater than 2, the last
++	    # element of the list must be a form.  The second through
++	    # the penultimate elements are joined together and
++	    # evaluated using subst.  This allows constructs such as
++	    # [gdb_target_symbol foo] to be used.
++
++	    if {[llength $attr] > 2} {
++	        set attr_value [uplevel 2 [list subst [join [lrange $attr 1 end-1]]]]
++	    } else {
++	        set attr_value [uplevel 2 [list subst [lindex $attr 1]]]
++	    }
++
++	    if { [string equal "MACRO_AT_func" $attr_name] } {
++		_handle_macro_at_func $attr_value
++	    } elseif { [string equal "MACRO_AT_range" $attr_name] } {
++		_handle_macro_at_range $attr_value
++	    } else {
++		if {[llength $attr] > 2} {
++		    set attr_form [uplevel 2 [list subst [lindex $attr end]]]
++
++		    if { [string index $attr_value 0] == ":" } {
++			# It is a label, get its value.
++			_guess_form $attr_value attr_value
++		    }
++		} else {
++		    # If the value looks like an integer, a form is required.
++		    if [string is integer $attr_value] {
++			error "Integer value requires a form"
++		    }
++		    set attr_form [_guess_form $attr_value attr_value]
++		}
++		set attr_form [_map_name $attr_form _FORM]
++
++		_handle_attribute $attr_name $attr_value $attr_form
++	    }
++	}
++
++	_defer_output $_abbrev_section {
++	    # Terminator.
++	    _op .byte 0x0 Terminator
++	    _op .byte 0x0 Terminator
++	}
++
++	if {$has_children} {
++	    uplevel 2 $children
++
++	    # Terminate children.
++	    _op .byte 0x0 "Terminate children"
++	}
++    }
++
++    proc _emit {string} {
++	variable _output_file
++	variable _defer
++	variable _deferred_output
++
++	if {$_defer == ""} {
++	    puts $_output_file $string
++	} else {
++	    append _deferred_output($_defer) ${string}\n
++	}
++    }
++
++    proc _section {name {flags ""} {type ""}} {
++	if {$flags == "" && $type == ""} {
++	    _emit "        .section $name"
++	} elseif {$type == ""} {
++	    _emit "        .section $name, \"$flags\""
++	} else {
++	    _emit "        .section $name, \"$flags\", %$type"
++	}
++    }
++
++    # SECTION_SPEC is a list of arguments to _section.
++    proc _defer_output {section_spec body} {
++	variable _defer
++	variable _deferred_output
++
++	set old_defer $_defer
++	set _defer [lindex $section_spec 0]
++
++	if {![info exists _deferred_output($_defer)]} {
++	    set _deferred_output($_defer) ""
++	    eval _section $section_spec
++	}
++
++	uplevel $body
++
++	set _defer $old_defer
++    }
++
++    proc _defer_to_string {body} {
++	variable _defer
++	variable _deferred_output
++
++	set old_defer $_defer
++	set _defer temp
++
++	set _deferred_output($_defer) ""
++
++	uplevel $body
++
++	set result $_deferred_output($_defer)
++	unset _deferred_output($_defer)
++
++	set _defer $old_defer
++	return $result
++    }
++
++    proc _write_deferred_output {} {
++	variable _output_file
++	variable _deferred_output
++
++	foreach section [array names _deferred_output] {
++	    # The data already has a newline.
++	    puts -nonewline $_output_file $_deferred_output($section)
++	}
++
++	# Save some memory.
++	unset _deferred_output
++    }
++
++    proc _op {name value {comment ""}} {
++	set text "        ${name}        ${value}"
++	if {$comment != ""} {
++	    # Try to make stuff line up nicely.
++	    while {[string length $text] < 40} {
++		append text " "
++	    }
++	    append text "/* ${comment} */"
++	}
++	_emit $text
++    }
++
++    proc _compute_label {name} {
++	return ".L${name}"
++    }
++
++    # Return a name suitable for use as a label.  If BASE_NAME is
++    # specified, it is incorporated into the label name; this is to
++    # make debugging the generated assembler easier.  If BASE_NAME is
++    # not specified a generic default is used.  This proc does not
++    # define the label; see 'define_label'.  'new_label' attempts to
++    # ensure that label names are unique.
++    proc new_label {{base_name label}} {
++	variable _label_num
++
++	return [_compute_label ${base_name}[incr _label_num]]
++    }
++
++    # Define a label named NAME.  Ordinarily, NAME comes from a call
++    # to 'new_label', but this is not required.
++    proc define_label {name} {
++	_emit "${name}:"
++    }
++
++    # Declare a global label.  This is typically used to refer to
++    # labels defined in other files, for example a function defined in
++    # a .c file.
++    proc extern {args} {
++	foreach name $args {
++	    _op .global $name
++	}
++    }
++
++    # A higher-level interface to label handling.
++    #
++    # ARGS is a list of label descriptors.  Each one is either a
++    # single element, or a list of two elements -- a name and some
++    # text.  For each descriptor, 'new_label' is invoked.  If the list
++    # form is used, the second element in the list is passed as an
++    # argument.  The label name is used to define a variable in the
++    # enclosing scope; this can be used to refer to the label later.
++    # The label name is also used to define a new proc whose name is
++    # the label name plus a trailing ":".  This proc takes a body as
++    # an argument and can be used to define the label at that point;
++    # then the body, if any, is evaluated in the caller's context.
++    #
++    # For example:
++    #
++    # declare_labels int_label
++    # something { ... $int_label }   ;# refer to the label
++    # int_label: constant { ... }    ;# define the label
++    proc declare_labels {args} {
++	foreach arg $args {
++	    set name [lindex $arg 0]
++	    set text [lindex $arg 1]
++
++	    upvar $name label_var
++	    if {$text == ""} {
++		set label_var [new_label]
++	    } else {
++		set label_var [new_label $text]
++	    }
++
++	    proc ${name}: {args} [format {
++		define_label %s
++		uplevel $args
++	    } $label_var]
++	}
++    }
++
++    # This is a miniature assembler for location expressions.  It is
++    # suitable for use in the attributes to a DIE.  Its output is
++    # prefixed with "=" to make it automatically use DW_FORM_block.
++    # BODY is split by lines, and each line is taken to be a list.
++    # (FIXME should use 'info complete' here.)
++    # Each list's first element is the opcode, either short or long
++    # forms are accepted.
++    # FIXME argument handling
++    # FIXME move docs
++    proc _location {body} {
++	variable _constants
++	variable _cu_label
++	variable _cu_version
++	variable _cu_addr_size
++	variable _cu_offset_size
++
++	foreach line [split $body \n] {
++	    # Ignore blank lines, and allow embedded comments.
++	    if {[lindex $line 0] == "" || [regexp -- {^[ \t]*#} $line]} {
++		continue
++	    }
++	    set opcode [_map_name [lindex $line 0] _OP]
++	    _op .byte $_constants($opcode) $opcode
++
++	    switch -exact -- $opcode {
++		DW_OP_addr {
++		    _op .${_cu_addr_size}byte [lindex $line 1]
++		}
++
++		DW_OP_regx {
++		    _op .uleb128 [lindex $line 1]
++		}
++
++		DW_OP_pick -
++		DW_OP_const1u -
++		DW_OP_const1s {
++		    _op .byte [lindex $line 1]
++		}
++
++		DW_OP_const2u -
++		DW_OP_const2s {
++		    _op .2byte [lindex $line 1]
++		}
++
++		DW_OP_const4u -
++		DW_OP_const4s {
++		    _op .4byte [lindex $line 1]
++		}
++
++		DW_OP_const8u -
++		DW_OP_const8s {
++		    _op .8byte [lindex $line 1]
++		}
++
++		DW_OP_constu {
++		    _op .uleb128 [lindex $line 1]
++		}
++		DW_OP_consts {
++		    _op .sleb128 [lindex $line 1]
++		}
++
++		DW_OP_plus_uconst {
++		    _op .uleb128 [lindex $line 1]
++		}
++
++		DW_OP_piece {
++		    _op .uleb128 [lindex $line 1]
++		}
++
++		DW_OP_bit_piece {
++		    _op .uleb128 [lindex $line 1]
++		    _op .uleb128 [lindex $line 2]
++		}
++
++		DW_OP_skip -
++		DW_OP_bra {
++		    _op .2byte [lindex $line 1]
++		}
++
++		DW_OP_implicit_value {
++		    set l1 [new_label "value_start"]
++		    set l2 [new_label "value_end"]
++		    _op .uleb128 "$l2 - $l1"
++		    define_label $l1
++		    foreach value [lrange $line 1 end] {
++			switch -regexp -- $value {
++			    {^0x[[:xdigit:]]{1,2}$} {_op .byte $value}
++			    {^0x[[:xdigit:]]{4}$} {_op .2byte $value}
++			    {^0x[[:xdigit:]]{8}$} {_op .4byte $value}
++			    {^0x[[:xdigit:]]{16}$} {_op .8byte $value}
++			    default {
++				error "bad value '$value' in DW_OP_implicit_value"
++			    }
++			}
++		    }
++		    define_label $l2
++		}
++
++		DW_OP_implicit_pointer -
++		DW_OP_GNU_implicit_pointer {
++		    if {[llength $line] != 3} {
++			error "usage: $opcode LABEL OFFSET"
++		    }
++
++		    # Here label is a section offset.
++		    set label [lindex $line 1]
++		    if { $_cu_version == 2 } {
++			_op .${_cu_addr_size}byte $label
++		    } else {
++			_op .${_cu_offset_size}byte $label
++		    }
++		    _op .sleb128 [lindex $line 2]
++		}
++
++		DW_OP_GNU_variable_value {
++		    if {[llength $line] != 2} {
++			error "usage: $opcode LABEL"
++		    }
++
++		    # Here label is a section offset.
++		    set label [lindex $line 1]
++		    if { $_cu_version == 2 } {
++			_op .${_cu_addr_size}byte $label
++		    } else {
++			_op .${_cu_offset_size}byte $label
++		    }
++		}
++
++		DW_OP_deref_size {
++		    if {[llength $line] != 2} {
++			error "usage: DW_OP_deref_size SIZE"
++		    }
++
++		    _op .byte [lindex $line 1]
++		}
++
++		DW_OP_bregx {
++		    _op .uleb128 [lindex $line 1]
++		    _op .sleb128 [lindex $line 2]
++		}
++
++		default {
++		    if {[llength $line] > 1} {
++			error "Unimplemented: operands in location for $opcode"
++		    }
++		}
++	    }
++	}
++    }
++
++    # Emit a DWARF CU.
++    # OPTIONS is a list with an even number of elements containing
++    # option-name and option-value pairs.
++    # Current options are:
++    # is_64 0|1    - boolean indicating if you want to emit 64-bit DWARF
++    #                default = 0 (32-bit)
++    # version n    - DWARF version number to emit
++    #                default = 4
++    # addr_size n  - the size of addresses, 32, 64, or default
++    #                default = default
++    # fission 0|1  - boolean indicating if generating Fission debug info
++    #                default = 0
++    # BODY is Tcl code that emits the DIEs which make up the body of
++    # the CU.  It is evaluated in the caller's context.
++    proc cu {options body} {
++	variable _cu_count
++	variable _abbrev_section
++	variable _abbrev_num
++	variable _cu_label
++	variable _cu_version
++	variable _cu_addr_size
++	variable _cu_offset_size
++
++	# Establish the defaults.
++	set is_64 0
++	set _cu_version 4
++	set _cu_addr_size default
++	set fission 0
++	set section ".debug_info"
++	set _abbrev_section ".debug_abbrev"
++
++	foreach { name value } $options {
++	    set value [uplevel 1 "subst \"$value\""]
++	    switch -exact -- $name {
++		is_64 { set is_64 $value }
++		version { set _cu_version $value }
++		addr_size { set _cu_addr_size $value }
++		fission { set fission $value }
++		default { error "unknown option $name" }
++	    }
++	}
++	if {$_cu_addr_size == "default"} {
++	    if {[is_64_target]} {
++		set _cu_addr_size 8
++	    } else {
++		set _cu_addr_size 4
++	    }
++	}
++	set _cu_offset_size [expr { $is_64 ? 8 : 4 }]
++	if { $fission } {
++	    set section ".debug_info.dwo"
++	    set _abbrev_section ".debug_abbrev.dwo"
++	}
++
++	_section $section
++
++	set cu_num [incr _cu_count]
++	set my_abbrevs [_compute_label "abbrev${cu_num}_begin"]
++	set _abbrev_num 1
++
++	set _cu_label [_compute_label "cu${cu_num}_begin"]
++	set start_label [_compute_label "cu${cu_num}_start"]
++	set end_label [_compute_label "cu${cu_num}_end"]
++
++	define_label $_cu_label
++	if {$is_64} {
++	    _op .4byte 0xffffffff
++	    _op .8byte "$end_label - $start_label"
++	} else {
++	    _op .4byte "$end_label - $start_label"
++	}
++	define_label $start_label
++	_op .2byte $_cu_version Version
++	_op .${_cu_offset_size}byte $my_abbrevs Abbrevs
++	_op .byte $_cu_addr_size "Pointer size"
++
++	_defer_output $_abbrev_section {
++	    define_label $my_abbrevs
++	}
++
++	uplevel $body
++
++	_defer_output $_abbrev_section {
++	    # Emit the terminator.
++	    _op .byte 0x0 Terminator
++	    _op .byte 0x0 Terminator
++	}
++
++	define_label $end_label
++    }
++
++    # Emit a DWARF TU.
++    # OPTIONS is a list with an even number of elements containing
++    # option-name and option-value pairs.
++    # Current options are:
++    # is_64 0|1    - boolean indicating if you want to emit 64-bit DWARF
++    #                default = 0 (32-bit)
++    # version n    - DWARF version number to emit
++    #                default = 4
++    # addr_size n  - the size of addresses, 32, 64, or default
++    #                default = default
++    # fission 0|1  - boolean indicating if generating Fission debug info
++    #                default = 0
++    # SIGNATURE is the 64-bit signature of the type.
++    # TYPE_LABEL is the label of the type defined by this TU,
++    # or "" if there is no type (i.e., type stubs in Fission).
++    # BODY is Tcl code that emits the DIEs which make up the body of
++    # the TU.  It is evaluated in the caller's context.
++    proc tu {options signature type_label body} {
++	variable _cu_count
++	variable _abbrev_section
++	variable _abbrev_num
++	variable _cu_label
++	variable _cu_version
++	variable _cu_addr_size
++	variable _cu_offset_size
++
++	# Establish the defaults.
++	set is_64 0
++	set _cu_version 4
++	set _cu_addr_size default
++	set fission 0
++	set section ".debug_types"
++	set _abbrev_section ".debug_abbrev"
++
++	foreach { name value } $options {
++	    switch -exact -- $name {
++		is_64 { set is_64 $value }
++		version { set _cu_version $value }
++		addr_size { set _cu_addr_size $value }
++		fission { set fission $value }
++		default { error "unknown option $name" }
++	    }
++	}
++	if {$_cu_addr_size == "default"} {
++	    if {[is_64_target]} {
++		set _cu_addr_size 8
++	    } else {
++		set _cu_addr_size 4
++	    }
++	}
++	set _cu_offset_size [expr { $is_64 ? 8 : 4 }]
++	if { $fission } {
++	    set section ".debug_types.dwo"
++	    set _abbrev_section ".debug_abbrev.dwo"
++	}
++
++	_section $section
++
++	set cu_num [incr _cu_count]
++	set my_abbrevs [_compute_label "abbrev${cu_num}_begin"]
++	set _abbrev_num 1
++
++	set _cu_label [_compute_label "cu${cu_num}_begin"]
++	set start_label [_compute_label "cu${cu_num}_start"]
++	set end_label [_compute_label "cu${cu_num}_end"]
++
++	define_label $_cu_label
++	if {$is_64} {
++	    _op .4byte 0xffffffff
++	    _op .8byte "$end_label - $start_label"
++	} else {
++	    _op .4byte "$end_label - $start_label"
++	}
++	define_label $start_label
++	_op .2byte $_cu_version Version
++	_op .${_cu_offset_size}byte $my_abbrevs Abbrevs
++	_op .byte $_cu_addr_size "Pointer size"
++	_op .8byte $signature Signature
++	if { $type_label != "" } {
++	    uplevel declare_labels $type_label
++	    upvar $type_label my_type_label
++	    if {$is_64} {
++		_op .8byte "$my_type_label - $_cu_label"
++	    } else {
++		_op .4byte "$my_type_label - $_cu_label"
++	    }
++	} else {
++	    if {$is_64} {
++		_op .8byte 0
++	    } else {
++		_op .4byte 0
++	    }
++	}
++
++	_defer_output $_abbrev_section {
++	    define_label $my_abbrevs
++	}
++
++	uplevel $body
++
++	_defer_output $_abbrev_section {
++	    # Emit the terminator.
++	    _op .byte 0x0 Terminator
++	    _op .byte 0x0 Terminator
++	}
++
++	define_label $end_label
++    }
++
++    # Emit a DWARF .debug_ranges unit.
++    # OPTIONS is a list with an even number of elements containing
++    # option-name and option-value pairs.
++    # Current options are:
++    # is_64 0|1    - boolean indicating if you want to emit 64-bit DWARF
++    #                default = 0 (32-bit)
++    #
++    # BODY is Tcl code that emits the content of the .debug_ranges
++    # unit, it is evaluated in the caller's context.
++    proc ranges {options body} {
++	variable _debug_ranges_64_bit
++
++	foreach { name value } $options {
++	    switch -exact -- $name {
++		is_64 { set _debug_ranges_64_bit [subst $value] }
++		default { error "unknown option $name" }
++	    }
++	}
++
++	set section ".debug_ranges"
++	_section $section
++
++	proc sequence {{ranges {}}} {
++	    variable _debug_ranges_64_bit
++
++	    # Emit the sequence of addresses.
++	    set base ""
++	    foreach range $ranges {
++		set range [uplevel 1 "subst \"$range\""]
++		set type [lindex $range 0]
++		switch -exact -- $type {
++		    base {
++			set base [lrange $range 1 end]
++
++			if { $_debug_ranges_64_bit } then {
++			    _op .8byte 0xffffffffffffffff "Base Marker"
++			    _op .8byte $base "Base Address"
++			} else {
++			    _op .4byte 0xffffffff "Base Marker"
++			    _op .4byte $base "Base Address"
++			}
++		    }
++		    range {
++			set start [lindex $range 1]
++			set end [lrange $range 2 end]
++
++			if { $_debug_ranges_64_bit } then {
++			    _op .8byte $start "Start Address"
++			    _op .8byte $end "End Address"
++			} else {
++			    _op .4byte $start "Start Address"
++			    _op .4byte $end "End Address"
++			}
++		    }
++		    default { error "unknown range type: $type " }
++		}
++	    }
++
++	    # End of the sequence.
++	    if { $_debug_ranges_64_bit } then {
++		_op .8byte 0x0 "End of Sequence Marker (Part 1)"
++		_op .8byte 0x0 "End of Sequence Marker (Part 2)"
++	    } else {
++		_op .4byte 0x0 "End of Sequence Marker (Part 1)"
++		_op .4byte 0x0 "End of Sequence Marker (Part 2)"
++	    }
++	}
++
++	uplevel $body
++    }
++
++
++    # Emit a DWARF .debug_line unit.
++    # OPTIONS is a list with an even number of elements containing
++    # option-name and option-value pairs.
++    # Current options are:
++    # is_64 0|1    - boolean indicating if you want to emit 64-bit DWARF
++    #                default = 0 (32-bit)
++    # version n    - DWARF version number to emit
++    #                default = 4
++    # addr_size n  - the size of addresses, 32, 64, or default
++    #                default = default
++    #
++    # LABEL is the label of the current unit (which is probably
++    # referenced by a DW_AT_stmt_list), or "" if there is no such
++    # label.
++    #
++    # BODY is Tcl code that emits the parts which make up the body of
++    # the line unit.  It is evaluated in the caller's context.  The
++    # following commands are available for the BODY section:
++    #
++    #   include_dir "dirname" -- adds a new include directory
++    #
++    #   file_name "file.c" idx -- adds a new file name.  IDX is a
++    #   1-based index referencing an include directory or 0 for
++    #   current directory.
++
++    proc lines {options label body} {
++	variable _line_count
++	variable _line_saw_file
++	variable _line_saw_program
++	variable _line_header_end_label
++
++	# Establish the defaults.
++	set is_64 0
++	set _unit_version 4
++	set _unit_addr_size default
++
++	foreach { name value } $options {
++	    switch -exact -- $name {
++		is_64 { set is_64 $value }
++		version { set _unit_version $value }
++		addr_size { set _unit_addr_size $value }
++		default { error "unknown option $name" }
++	    }
++	}
++	if {$_unit_addr_size == "default"} {
++	    if {[is_64_target]} {
++		set _unit_addr_size 8
++	    } else {
++		set _unit_addr_size 4
++	    }
++	}
++
++	set unit_num [incr _line_count]
++
++	set section ".debug_line"
++	_section $section
++
++	if { "$label" != "" } {
++	    # Define the user-provided label at this point.
++	    $label:
++	}
++
++	set unit_len_label [_compute_label "line${_line_count}_start"]
++	set unit_end_label [_compute_label "line${_line_count}_end"]
++	set header_len_label [_compute_label "line${_line_count}_header_start"]
++	set _line_header_end_label [_compute_label "line${_line_count}_header_end"]
++
++	if {$is_64} {
++	    _op .4byte 0xffffffff
++	    _op .8byte "$unit_end_label - $unit_len_label" "unit_length"
++	} else {
++	    _op .4byte "$unit_end_label - $unit_len_label" "unit_length"
++	}
++
++	define_label $unit_len_label
++
++	_op .2byte $_unit_version version
++
++	if {$is_64} {
++	    _op .8byte "$_line_header_end_label - $header_len_label" "header_length"
++	} else {
++	    _op .4byte "$_line_header_end_label - $header_len_label" "header_length"
++	}
++
++	define_label $header_len_label
++
++	_op .byte 1 "minimum_instruction_length"
++	_op .byte 1 "default_is_stmt"
++	_op .byte 1 "line_base"
++	_op .byte 1 "line_range"
++	_op .byte 10 "opcode_base"
++
++	# The standard_opcode_lengths table.  The number of arguments
++	# for each of the standard opcodes.  Generating 9 entries here
++	# matches the use of 10 in the opcode_base above.  These 9
++	# entries match the 9 standard opcodes for DWARF2, making use
++	# of only 9 should be fine, even if we are generating DWARF3
++	# or DWARF4.
++	_op .byte 0 "standard opcode 1"
++	_op .byte 1 "standard opcode 2"
++	_op .byte 1 "standard opcode 3"
++	_op .byte 1 "standard opcode 4"
++	_op .byte 1 "standard opcode 5"
++	_op .byte 0 "standard opcode 6"
++	_op .byte 0 "standard opcode 7"
++	_op .byte 0 "standard opcode 8"
++	_op .byte 1 "standard opcode 9"
++
++	proc include_dir {dirname} {
++	    _op .ascii [_quote $dirname]
++	}
++
++	proc file_name {filename diridx} {
++	    variable _line_saw_file
++	    if "! $_line_saw_file" {
++		# Terminate the dir list.
++		_op .byte 0 "Terminator."
++		set _line_saw_file 1
++	    }
++
++	    _op .ascii [_quote $filename]
++	    _op .sleb128 $diridx
++	    _op .sleb128 0 "mtime"
++	    _op .sleb128 0 "length"
++	}
++
++	proc program {statements} {
++	    variable _line_saw_program
++	    variable _line_header_end_label
++
++	    if "! $_line_saw_program" {
++		# Terminate the file list.
++		_op .byte 0 "Terminator."
++		define_label $_line_header_end_label
++		set _line_saw_program 1
++	    }
++
++	    proc DW_LNE_set_address {addr} {
++		_op .byte 0
++		set start [new_label "set_address_start"]
++		set end [new_label "set_address_end"]
++		_op .uleb128 "${end} - ${start}"
++		define_label ${start}
++		_op .byte 2
++		if {[is_64_target]} {
++		    _op .8byte ${addr}
++		} else {
++		    _op .4byte ${addr}
++		}
++		define_label ${end}
++	    }
++
++	    proc DW_LNE_end_sequence {} {
++		_op .byte 0
++		_op .uleb128 1
++		_op .byte 1
++	    }
++
++	    proc DW_LNS_copy {} {
++		_op .byte 1
++	    }
++
++	    proc DW_LNS_advance_pc {offset} {
++		_op .byte 2
++		_op .uleb128 ${offset}
++	    }
++
++	    proc DW_LNS_advance_line {offset} {
++		_op .byte 3
++		_op .sleb128 ${offset}
++	    }
++
++	    foreach statement $statements {
++		uplevel 1 $statement
++	    }
++	}
++
++	uplevel $body
++
++	rename include_dir ""
++	rename file_name ""
++
++	# Terminate dir list if we saw no files.
++	if "! $_line_saw_file" {
++	    _op .byte 0 "Terminator."
++	}
++
++	# Terminate the file list.
++	if "! $_line_saw_program" {
++	    _op .byte 0 "Terminator."
++	    define_label $_line_header_end_label
++	}
++
++	define_label $unit_end_label
++    }
++
++    proc _empty_array {name} {
++	upvar $name the_array
++
++	catch {unset the_array}
++	set the_array(_) {}
++	unset the_array(_)
++    }
++
++    # Emit a .gnu_debugaltlink section with the given file name and
++    # build-id.  The buildid should be represented as a hexadecimal
++    # string, like "ffeeddcc".
++    proc gnu_debugaltlink {filename buildid} {
++	_defer_output .gnu_debugaltlink {
++	    _op .ascii [_quote $filename]
++	    foreach {a b} [split $buildid {}] {
++		_op .byte 0x$a$b
++	    }
++	}
++    }
++
++    proc _note {type name hexdata} {
++	set namelen [expr [string length $name] + 1]
++
++	# Name size.
++	_op .4byte $namelen
++	# Data size.
++	_op .4byte [expr [string length $hexdata] / 2]
++	# Type.
++	_op .4byte $type
++	# The name.
++	_op .ascii [_quote $name]
++	# Alignment.
++	set align 2
++	set total [expr {($namelen + (1 << $align) - 1) & -(1 << $align)}]
++	for {set i $namelen} {$i < $total} {incr i} {
++	    _op .byte 0
++	}
++	# The data.
++	foreach {a b} [split $hexdata {}] {
++	    _op .byte 0x$a$b
++	}
++    }
++
++    # Emit a note section holding the given build-id.
++    proc build_id {buildid} {
++	_defer_output {.note.gnu.build-id a note} {
++	    # From elf/common.h.
++	    set NT_GNU_BUILD_ID 3
++
++	    _note $NT_GNU_BUILD_ID GNU $buildid
++	}
++    }
++
++    # The top-level interface to the DWARF assembler.
++    # FILENAME is the name of the file where the generated assembly
++    # code is written.
++    # BODY is Tcl code to emit the assembly.  It is evaluated via
++    # "eval" -- not uplevel as you might expect, because it is
++    # important to run the body in the Dwarf namespace.
++    #
++    # A typical invocation is something like:
++    #    Dwarf::assemble $file {
++    #        cu 0 2 8 {
++    #            compile_unit {
++    #            ...
++    #            }
++    #        }
++    #        cu 0 2 8 {
++    #        ...
++    #        }
++    #    }
++    proc assemble {filename body} {
++	variable _initialized
++	variable _output_file
++	variable _deferred_output
++	variable _defer
++	variable _label_num
++	variable _strings
++	variable _cu_count
++	variable _line_count
++	variable _line_saw_file
++	variable _line_saw_program
++	variable _line_header_end_label
++	variable _debug_ranges_64_bit
++
++	if {!$_initialized} {
++	    _read_constants
++	    set _initialized 1
++	}
++
++	set _output_file [open $filename w]
++	set _cu_count 0
++	_empty_array _deferred_output
++	set _defer ""
++	set _label_num 0
++	_empty_array _strings
++
++	set _line_count 0
++	set _line_saw_file 0
++	set _line_saw_program 0
++	set _debug_ranges_64_bit [is_64_target]
++
++	# Not "uplevel" here, because we want to evaluate in this
++	# namespace.  This is somewhat bad because it means we can't
++	# readily refer to outer variables.
++	eval $body
++
++	_write_deferred_output
++
++	catch {close $_output_file}
++	set _output_file {}
++    }
++}
+diff --git a/testsuite/lib/no-multifile-prop.exp b/testsuite/lib/no-multifile-prop.exp
+new file mode 100644
+index 0000000..bcd9669
+--- /dev/null
++++ b/testsuite/lib/no-multifile-prop.exp
+@@ -0,0 +1,132 @@
++# Copyright 2019 Free Software Foundation, Inc.
++
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++load_lib dwarf-lib.exp
++load_lib dwarf.exp
++
++set asm_file no-multifile-prop-dw.S
++
++Dwarf::assemble $asm_file {
++
++    # CU 1
++    cu {} {
++	DW_TAG_compile_unit {
++	    {DW_AT_language @DW_LANG_C_plus_plus}
++	    {DW_AT_name     1.c}
++	    {DW_AT_comp_dir /tmp}
++	} {
++	    declare_labels integer_label var_label
++
++	    integer_label: DW_TAG_base_type {
++		{DW_AT_byte_size 4 DW_FORM_data1}
++		{DW_AT_encoding  @DW_ATE_signed}
++		{DW_AT_name      integer}
++	    }
++
++	    var_label: DW_TAG_variable {
++		{DW_AT_name foo1}
++		{DW_AT_type :$integer_label}
++		{external 1 flag}
++	    }
++
++	    DW_TAG_variable {
++		{DW_AT_name foo2}
++		{DW_AT_type :$integer_label}
++		{DW_AT_location {
++		    DW_OP_GNU_implicit_pointer $var_label 0
++		} SPECIAL_expr}
++		{external 1 flag}
++	    }
++	}
++    }
++
++    # CU 2
++    cu {} {
++	DW_TAG_compile_unit {
++	    {DW_AT_language @DW_LANG_C_plus_plus}
++	    {DW_AT_name     2.c}
++	    {DW_AT_comp_dir /tmp}
++	} {
++	    declare_labels integer_label var_label
++
++	    integer_label: DW_TAG_base_type {
++		{DW_AT_byte_size 4 DW_FORM_data1}
++		{DW_AT_encoding  @DW_ATE_signed}
++		{DW_AT_name      integer}
++	    }
++
++	    var_label: DW_TAG_variable {
++		{DW_AT_name foo1}
++		{DW_AT_type :$integer_label}
++		{external 1 flag}
++	    }
++
++	    DW_TAG_imported_declaration {
++		{DW_AT_import :$var_label}
++	    }
++	}
++    }
++
++    # CU 3
++    cu {} {
++	DW_TAG_compile_unit {
++	    {DW_AT_language @DW_LANG_C_plus_plus}
++	    {DW_AT_name     3.c}
++	    {DW_AT_comp_dir /tmp}
++	} {
++	    declare_labels integer_label
++
++	    integer_label: DW_TAG_base_type {
++		{DW_AT_byte_size 4 DW_FORM_data1}
++		{DW_AT_encoding  @DW_ATE_signed}
++		{DW_AT_name      integer}
++	    }
++
++	    DW_TAG_variable {
++		{DW_AT_name foo1}
++		{DW_AT_type :$integer_label}
++		{external 1 flag}
++	    }
++
++	}
++    }
++
++    # CU 4
++    cu {} {
++	DW_TAG_compile_unit {
++	    {DW_AT_language @DW_LANG_C_plus_plus}
++	    {DW_AT_name     4.c}
++	    {DW_AT_comp_dir /tmp}
++	} {
++	    declare_labels integer_label var_label
++
++	    integer_label: DW_TAG_base_type {
++		{DW_AT_byte_size 4 DW_FORM_data1}
++		{DW_AT_encoding  @DW_ATE_signed}
++		{DW_AT_name      integer}
++	    }
++
++	    var_label: DW_TAG_variable {
++		{DW_AT_name foo1}
++		{DW_AT_type :$integer_label}
++		{external 1 flag}
++	    }
++
++	    DW_TAG_imported_declaration {
++		{DW_AT_import :$var_label}
++	    }
++	}
++    }
++}

@@ -1,0 +1,145 @@
+dwz (0.13-5~bpo10+1) buster-backports; urgency=medium
+
+  * Non-maintainer upload
+  * Rebuild for buster-backports.
+
+ -- Anthony Fok <foka@debian.org>  Tue, 08 Dec 2020 15:28:54 -0700
+
+dwz (0.13-5) unstable; urgency=medium
+
+  * Apply updates from the trunk.
+    - Fix PR25252.
+
+ -- Matthias Klose <doko@debian.org>  Fri, 06 Dec 2019 20:04:31 +0100
+
+dwz (0.13-4) unstable; urgency=medium
+
+  * Apply updates from the trunk.
+    - Fix PR24169.
+
+ -- Matthias Klose <doko@debian.org>  Thu, 28 Nov 2019 11:25:00 +0100
+
+dwz (0.13-3) unstable; urgency=medium
+
+  * Apply updates from the trunk.
+    - Fix PR24764, PR25024. Closes: #892828.
+
+ -- Matthias Klose <doko@debian.org>  Wed, 27 Nov 2019 21:25:08 +0100
+
+dwz (0.13-2) unstable; urgency=medium
+
+  * Apply updates from the trunk.
+    - Fix PR 2509, taken from the trunk. Closes: #942193.
+  * Bump standards version.
+
+ -- Matthias Klose <doko@debian.org>  Thu, 07 Nov 2019 14:01:46 +0100
+
+dwz (0.13-1build1) eoan; urgency=medium
+
+  * Test build.
+
+ -- Matthias Klose <doko@ubuntu.com>  Sat, 07 Sep 2019 12:40:19 +0200
+
+dwz (0.13-1) unstable; urgency=medium
+
+  * dwz 0.13 release.
+
+ -- Matthias Klose <doko@debian.org>  Sun, 11 Aug 2019 17:20:00 +0200
+
+dwz (0.12.20190723-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+    - PR 24823, MIPS: Require single pointer size.
+    - Mark DW_OP_GNU_variable_value-referenced DIEs with die_no_multifile.
+
+ -- Matthias Klose <doko@debian.org>  Tue, 23 Jul 2019 15:32:17 +0200
+
+dwz (0.12.20190716-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+    - Don't expect smaller executable when using objcopy and eu-unstrip.
+    - Require compatible objcopy and eu-unstrip for objcopy-eu-unstrip*.sh.
+      Closes: #932019.
+
+ -- Matthias Klose <doko@debian.org>  Tue, 16 Jul 2019 15:59:50 +0200
+
+dwz (0.12.20190711-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+    - If .debug_info section not present, exit with 0.
+
+ -- Matthias Klose <doko@debian.org>  Fri, 12 Jul 2019 00:25:25 +0200
+
+dwz (0.12.20190710-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+    - Fix PR dwz/24783, verify_sections assert on MIPS.
+  * Bump standards version.
+
+ -- Matthias Klose <doko@debian.org>  Wed, 10 Jul 2019 09:29:56 +0200
+
+dwz (0.12.20190706-1) unstable; urgency=medium
+
+  * New upstream snapshot.
+
+ -- Matthias Klose <doko@debian.org>  Sat, 06 Jul 2019 13:58:15 +0200
+
+dwz (0.12.20190703-1) experimental; urgency=medium
+
+  * New upstream snapshot.
+  * Remove patches applied upstream.
+
+ -- Matthias Klose <doko@debian.org>  Wed, 03 Jul 2019 09:28:13 +0200
+
+dwz (0.12.20190702-2) experimental; urgency=medium
+
+  * New upstream snapshot.
+  * Fix manpage installation.
+  * Bump standards version.
+  * Add more test dependencies.
+
+ -- Matthias Klose <doko@debian.org>  Tue, 02 Jul 2019 10:19:05 +0200
+
+dwz (0.12-3) unstable; urgency=medium
+
+  * Add DW_OP_GNU_variable_value support (taken from the trunk).
+  * Bump standards version.
+
+ -- Matthias Klose <doko@debian.org>  Tue, 11 Dec 2018 12:06:52 +0100
+
+dwz (0.12-2) unstable; urgency=medium
+
+  * Make the package M-A: foreign.
+  * Bump standards version.
+
+ -- Matthias Klose <doko@debian.org>  Wed, 25 Oct 2017 09:33:11 +0200
+
+dwz (0.12-1) unstable; urgency=medium
+
+  * New upstream version.
+
+ -- Matthias Klose <doko@debian.org>  Mon, 15 Feb 2016 20:06:32 +0100
+
+dwz (0.11-1) unstable; urgency=medium
+
+  * New upstream version.
+
+ -- Matthias Klose <doko@debian.org>  Thu, 27 Mar 2014 11:01:56 +0100
+
+dwz (0.10-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Matthias Klose <doko@debian.org>  Sat, 11 May 2013 16:40:55 +0200
+
+dwz (0.8-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Matthias Klose <doko@debian.org>  Sun, 27 Jan 2013 21:44:18 +0100
+
+dwz (0.4-1) unstable; urgency=low
+
+  * Initial release.
+
+ -- Matthias Klose <doko@debian.org>  Mon, 25 Jun 2012 11:44:53 +0200
